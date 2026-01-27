@@ -26,6 +26,82 @@ GITHUB_REPO="moghtaderi/conduit-manager-mac"
 SCRIPT_NAME="conduit-mac.sh"
 INSTALL_DIR="${HOME}/conduit-manager"
 
+# Detect if user has sudo privileges
+has_sudo_privileges() {
+    # Check if user can run sudo without password (for non-interactive scripts)
+    # or if they're already root
+    if [ "$(id -u)" -eq 0 ]; then
+        return 0
+    fi
+    # Try a harmless sudo command with no password prompt
+    if sudo -n true 2>/dev/null; then
+        return 0
+    fi
+    # Check if user is in admin/wheel group (potential sudo access)
+    if groups | grep -qE '\b(admin|wheel|sudo)\b'; then
+        return 0
+    fi
+    return 1
+}
+
+# Determine install type and set paths accordingly
+setup_install_paths() {
+    if has_sudo_privileges; then
+        INSTALL_TYPE="system"
+        BIN_DIR="/usr/local/bin"
+        SHARE_DIR="/usr/local/share/conduit"
+    else
+        INSTALL_TYPE="local"
+        BIN_DIR="${HOME}/.local/bin"
+        SHARE_DIR="${HOME}/.local/share/conduit"
+    fi
+}
+
+# Add local bin to PATH in shell profile if needed
+configure_local_path() {
+    local bin_dir="$1"
+    local path_line="export PATH=\"${bin_dir}:\$PATH\""
+    local profile_updated=false
+
+    # Skip if already in PATH
+    if echo "$PATH" | tr ':' '\n' | grep -qx "$bin_dir"; then
+        return 0
+    fi
+
+    # Determine which shell profile to use
+    local shell_profile=""
+    if [ -n "$ZSH_VERSION" ] || [ "$SHELL" = "/bin/zsh" ]; then
+        shell_profile="${HOME}/.zshrc"
+    elif [ -n "$BASH_VERSION" ] || [ "$SHELL" = "/bin/bash" ]; then
+        # On macOS, .bash_profile is preferred for login shells
+        if [ -f "${HOME}/.bash_profile" ]; then
+            shell_profile="${HOME}/.bash_profile"
+        else
+            shell_profile="${HOME}/.bashrc"
+        fi
+    else
+        # Default to .profile for other shells
+        shell_profile="${HOME}/.profile"
+    fi
+
+    # Check if PATH export already exists in profile
+    if [ -f "$shell_profile" ] && grep -qF "$bin_dir" "$shell_profile"; then
+        return 0
+    fi
+
+    # Add to shell profile
+    echo "" >> "$shell_profile"
+    echo "# Added by Conduit Manager installer" >> "$shell_profile"
+    echo "$path_line" >> "$shell_profile"
+
+    echo -e "${GREEN}✔${NC} Added ${bin_dir} to PATH in ${shell_profile}"
+    echo -e "${YELLOW}!${NC} Run 'source ${shell_profile}' or restart your terminal to use 'conduit' command"
+    return 0
+}
+
+# Initialize install paths
+setup_install_paths
+
 echo ""
 echo -e "${CYAN}"
 echo "  ██████╗ ██████╗ ███╗   ██╗██████╗ ██╗   ██╗██╗████████╗"
@@ -44,6 +120,14 @@ if [[ "$(uname)" != "Darwin" ]]; then
     echo "For Linux, please use: https://github.com/SamNet-dev/conduit-manager"
     exit 1
 fi
+
+# Show install type
+if [ "$INSTALL_TYPE" = "system" ]; then
+    echo -e "${BLUE}Install type:${NC} System-wide (/usr/local)"
+else
+    echo -e "${BLUE}Install type:${NC} Local (~/.local) - no admin privileges detected"
+fi
+echo ""
 
 # Check for Docker Desktop
 echo -e "${BLUE}Checking prerequisites...${NC}"
@@ -127,18 +211,31 @@ chmod +x "${INSTALL_DIR}/${SCRIPT_NAME}"
 
 echo -e "${GREEN}✔${NC} Script installed to: ${INSTALL_DIR}/${SCRIPT_NAME}"
 
-# Create symlink in /usr/local/bin if possible
-SYMLINK_PATH="/usr/local/bin/conduit"
-if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+# Create symlink based on install type
+SYMLINK_PATH="${BIN_DIR}/conduit"
+
+if [ "$INSTALL_TYPE" = "local" ]; then
+    # Local install: create ~/.local/bin directory and symlink
+    mkdir -p "$BIN_DIR"
     ln -sf "${INSTALL_DIR}/${SCRIPT_NAME}" "$SYMLINK_PATH" 2>/dev/null || true
     if [ -L "$SYMLINK_PATH" ]; then
-        echo -e "${GREEN}✔${NC} Created command: conduit"
-        echo "  You can now run 'conduit' from anywhere"
+        echo -e "${GREEN}✔${NC} Created command: conduit (in ${BIN_DIR})"
+        # Configure PATH for local install
+        configure_local_path "$BIN_DIR"
     fi
-elif [ -d "/usr/local/bin" ]; then
-    echo ""
-    echo -e "${YELLOW}To add 'conduit' command system-wide, run:${NC}"
-    echo "  sudo ln -sf \"${INSTALL_DIR}/${SCRIPT_NAME}\" /usr/local/bin/conduit"
+else
+    # System install: use /usr/local/bin
+    if [ -d "$BIN_DIR" ] && [ -w "$BIN_DIR" ]; then
+        ln -sf "${INSTALL_DIR}/${SCRIPT_NAME}" "$SYMLINK_PATH" 2>/dev/null || true
+        if [ -L "$SYMLINK_PATH" ]; then
+            echo -e "${GREEN}✔${NC} Created command: conduit"
+            echo "  You can now run 'conduit' from anywhere"
+        fi
+    elif [ -d "$BIN_DIR" ]; then
+        echo ""
+        echo -e "${YELLOW}To add 'conduit' command system-wide, run:${NC}"
+        echo "  sudo ln -sf \"${INSTALL_DIR}/${SCRIPT_NAME}\" ${BIN_DIR}/conduit"
+    fi
 fi
 
 # Download and install Menu Bar app
@@ -186,8 +283,16 @@ echo ""
 
 echo -e "${BOLD}What's installed:${NC}"
 echo "  - Terminal Manager: ${INSTALL_DIR}/${SCRIPT_NAME}"
+if [ -L "$SYMLINK_PATH" ]; then
+    echo "  - Command symlink:  ${SYMLINK_PATH}"
+fi
 if [ -d "$MENUBAR_APP" ]; then
     echo "  - Menu Bar App:     ${MENUBAR_APP}"
+fi
+if [ "$INSTALL_TYPE" = "local" ]; then
+    echo ""
+    echo -e "  ${YELLOW}Note:${NC} Installed locally (no admin privileges)."
+    echo "        PATH has been configured in your shell profile."
 fi
 echo ""
 
