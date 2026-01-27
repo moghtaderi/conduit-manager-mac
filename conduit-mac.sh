@@ -1071,37 +1071,37 @@ configure_resources() {
     echo -e "${YELLOW}Note:${NC} Changes require container restart to take effect."
     echo ""
 
-    # Memory configuration
-    echo -e "${BOLD}Set Memory Limit${NC}"
-    echo "  Examples: 1g, 2g, 4g, 512m"
-    echo "  Current:  ${MAX_MEMORY}"
-    read -p "  New value (or Enter to keep current): " new_memory
+    # Memory configuration (GB only, whole numbers)
+    # Extract current value without 'g' suffix for display
+    local current_mem_gb="${MAX_MEMORY%g}"
+    echo -e "${BOLD}Set Memory Limit (GB)${NC}"
+    echo "  Current:  ${current_mem_gb} GB"
+    read -p "  Enter GB (1-${total_ram_gb}, or Enter to keep current): " new_memory
 
     if [ -n "$new_memory" ]; then
-        # Validate format (number followed by g or m)
-        if [[ "$new_memory" =~ ^[0-9]+[gGmM]$ ]]; then
-            MAX_MEMORY="${new_memory,,}"  # Convert to lowercase
+        # Validate: must be a positive integer
+        if [[ "$new_memory" =~ ^[1-9][0-9]*$ ]]; then
+            MAX_MEMORY="${new_memory}g"
             MEMORY_SWAP="$MAX_MEMORY"
-            echo -e "  ${GREEN}✔ Memory limit set to ${MAX_MEMORY}${NC}"
+            echo -e "  ${GREEN}✔ Memory limit set to ${new_memory} GB${NC}"
         else
-            echo -e "  ${RED}Invalid format. Use format like: 2g or 512m${NC}"
+            echo -e "  ${RED}Invalid. Enter a whole number (e.g., 2, 4, 8)${NC}"
         fi
     fi
     echo ""
 
-    # CPU configuration
-    echo -e "${BOLD}Set CPU Limit${NC}"
-    echo "  Enter number of CPU cores (can be decimal, e.g., 1.5)"
-    echo "  Current:  ${MAX_CPUS}"
-    read -p "  New value (or Enter to keep current): " new_cpus
+    # CPU configuration (whole cores only)
+    echo -e "${BOLD}Set CPU Limit (cores)${NC}"
+    echo "  Current:  ${MAX_CPUS} cores"
+    read -p "  Enter cores (1-${total_cores}, or Enter to keep current): " new_cpus
 
     if [ -n "$new_cpus" ]; then
-        # Validate format (integer or decimal)
-        if [[ "$new_cpus" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+        # Validate: must be a positive integer
+        if [[ "$new_cpus" =~ ^[1-9][0-9]*$ ]]; then
             MAX_CPUS="$new_cpus"
             echo -e "  ${GREEN}✔ CPU limit set to ${MAX_CPUS} cores${NC}"
         else
-            echo -e "  ${RED}Invalid format. Use a number like: 2 or 1.5${NC}"
+            echo -e "  ${RED}Invalid. Enter a whole number (e.g., 1, 2, 4)${NC}"
         fi
     fi
     echo ""
