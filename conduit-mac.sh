@@ -561,9 +561,10 @@ restore_key() {
     fi
 
     # Restore the key using a temporary container
+    # Also fix ownership to UID 1000 (conduit user inside container)
     echo "Restoring key..."
     docker run --rm -v "$VOLUME_NAME":/data -v "$(dirname "$backup_file")":/backup alpine \
-        sh -c "cp /backup/$(basename "$backup_file") /data/conduit_key.json && chmod 600 /data/conduit_key.json"
+        sh -c "cp /backup/$(basename "$backup_file") /data/conduit_key.json && chmod 600 /data/conduit_key.json && chown -R 1000:1000 /data"
 
     # Restart container
     echo "Starting Conduit..."
@@ -761,6 +762,15 @@ install_new() {
         read -n 1 -s -r -p "Press any key to continue..."
         return 1
     fi
+
+    # --------------------------------------------------------------------------
+    # Fix volume permissions before starting container
+    # --------------------------------------------------------------------------
+    # The conduit container runs as UID 1000, but Docker creates volumes as root.
+    # We need to fix ownership so the container can write its key file.
+    echo "Setting up data volume permissions..."
+    docker run --rm -v "$VOLUME_NAME":/home/conduit/data alpine \
+        sh -c "chown -R 1000:1000 /home/conduit/data" 2>/dev/null || true
 
     # --------------------------------------------------------------------------
     # Deploy container with comprehensive security settings
