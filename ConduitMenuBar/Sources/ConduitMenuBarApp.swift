@@ -16,6 +16,14 @@ struct ConduitMenuBarApp: App {
     }
 }
 
+// MARK: - Docker Status
+
+enum DockerStatus {
+    case notInstalled
+    case notRunning
+    case running
+}
+
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -54,6 +62,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.tag = 100  // Tag for updating
         menu.addItem(statusItem)
 
+        // Docker status (hidden by default, shown when Docker has issues)
+        let dockerItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        dockerItem.tag = 101
+        dockerItem.isHidden = true
+        menu.addItem(dockerItem)
+
         // Client stats
         let statsItem = NSMenuItem(title: "Clients: -", action: nil, keyEquivalent: "")
         statsItem.tag = 102
@@ -77,6 +91,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Docker Desktop download link (hidden by default)
+        let downloadDockerItem = NSMenuItem(title: "Download Docker Desktop...", action: #selector(openDockerDownload), keyEquivalent: "")
+        downloadDockerItem.tag = 300
+        downloadDockerItem.isHidden = true
+        menu.addItem(downloadDockerItem)
+
         // Terminal manager
         menu.addItem(NSMenuItem(title: "Open Terminal Manager...", action: #selector(openTerminal), keyEquivalent: "t"))
 
@@ -90,22 +110,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateStatus() {
         guard let manager = conduitManager else { return }
 
-        let isRunning = manager.isContainerRunning()
+        let dockerStatus = manager.getDockerStatus()
+        let isRunning = dockerStatus == .running && manager.isContainerRunning()
 
         // Update icon based on status
         if let button = statusItem?.button {
-            // Use different SF Symbols for running vs stopped
-            let symbolName = isRunning ? "globe.americas.fill" : "globe"
+            let symbolName: String
+            switch dockerStatus {
+            case .notInstalled, .notRunning:
+                symbolName = "exclamationmark.triangle"
+            case .running:
+                symbolName = isRunning ? "globe.americas.fill" : "globe"
+            }
 
             if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Conduit") {
-                // Configure size for menu bar
                 let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
                 if let configuredImage = image.withSymbolConfiguration(config) {
-                    // Always use template mode for proper dark mode support
                     configuredImage.isTemplate = true
                     button.image = configuredImage
                 }
-                // Clear any tint - let the system handle light/dark mode
                 button.contentTintColor = nil
             }
         }
@@ -114,15 +137,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let menu = statusItem?.menu {
             // Status text
             if let statusMenuItem = menu.item(withTag: 100) {
-                statusMenuItem.title = isRunning ? "● Conduit: Running" : "○ Conduit: Stopped"
+                switch dockerStatus {
+                case .notInstalled:
+                    statusMenuItem.title = "⚠ Docker Not Installed"
+                case .notRunning:
+                    statusMenuItem.title = "⚠ Docker Not Running"
+                case .running:
+                    statusMenuItem.title = isRunning ? "● Conduit: Running" : "○ Conduit: Stopped"
+                }
+            }
+
+            // Docker status message
+            if let dockerItem = menu.item(withTag: 101) {
+                switch dockerStatus {
+                case .notInstalled:
+                    dockerItem.title = "   Install Docker Desktop to use Conduit"
+                    dockerItem.isHidden = false
+                case .notRunning:
+                    dockerItem.title = "   Please start Docker Desktop"
+                    dockerItem.isHidden = false
+                case .running:
+                    dockerItem.isHidden = true
+                }
             }
 
             // Client stats
             if let statsItem = menu.item(withTag: 102) {
                 if isRunning, let stats = manager.getStats() {
                     statsItem.title = "Clients: \(stats.connected) connected"
+                    statsItem.isHidden = false
                 } else {
                     statsItem.title = "Clients: -"
+                    statsItem.isHidden = dockerStatus != .running
                 }
             }
 
@@ -130,24 +176,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let trafficItem = menu.item(withTag: 103) {
                 if isRunning, let traffic = manager.getTraffic() {
                     trafficItem.title = "Traffic: ↑ \(traffic.upload)  ↓ \(traffic.download)"
+                    trafficItem.isHidden = false
                 } else {
                     trafficItem.title = "Traffic: -"
+                    trafficItem.isHidden = dockerStatus != .running
                 }
             }
 
             // Update Start/Stop button states
             if let startItem = menu.item(withTag: 200) {
                 startItem.title = isRunning ? "↻ Restart" : "▶ Start"
+                startItem.isEnabled = dockerStatus == .running
             }
 
             if let stopItem = menu.item(withTag: 201) {
                 stopItem.isEnabled = isRunning
             }
+
+            // Show/hide Docker download link
+            if let downloadItem = menu.item(withTag: 300) {
+                downloadItem.isHidden = dockerStatus != .notInstalled
+            }
         }
     }
 
     @objc func startConduit() {
-        conduitManager?.startContainer()
+        guard let manager = conduitManager else { return }
+
+        if manager.getDockerStatus() != .running {
+            showNotification(title: "Conduit", body: "Please start Docker Desktop first")
+            return
+        }
+
+        manager.startContainer()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             self?.updateStatus()
         }
@@ -160,6 +221,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateStatus()
         }
         showNotification(title: "Conduit", body: "Conduit service stopped")
+    }
+
+    @objc func openDockerDownload() {
+        if let url = URL(string: "https://www.docker.com/products/docker-desktop/") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc func openTerminal() {
@@ -219,14 +286,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 class ConduitManager {
     let containerName = "conduit-mac"
 
-    func isContainerRunning() -> Bool {
-        let output = runCommand("docker", arguments: ["ps", "--format", "{{.Names}}"])
-        return output.contains(containerName)
+    func getDockerStatus() -> DockerStatus {
+        // First check if Docker CLI exists
+        if !isDockerInstalled() {
+            return .notInstalled
+        }
+
+        // Then check if Docker daemon is running
+        if !isDockerRunning() {
+            return .notRunning
+        }
+
+        return .running
+    }
+
+    func isDockerInstalled() -> Bool {
+        let dockerPaths = [
+            "/usr/local/bin/docker",
+            "/opt/homebrew/bin/docker",
+            "/Applications/Docker.app/Contents/Resources/bin/docker"
+        ]
+        return dockerPaths.contains { FileManager.default.fileExists(atPath: $0) }
     }
 
     func isDockerRunning() -> Bool {
         let output = runCommand("docker", arguments: ["info"])
-        return !output.isEmpty && !output.contains("error")
+        // Docker info returns error text when daemon isn't running
+        return !output.isEmpty && !output.lowercased().contains("error") && !output.lowercased().contains("cannot connect")
+    }
+
+    func isContainerRunning() -> Bool {
+        let output = runCommand("docker", arguments: ["ps", "--format", "{{.Names}}"])
+        return output.contains(containerName)
     }
 
     func startContainer() {
