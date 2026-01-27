@@ -1643,13 +1643,15 @@ health_check() {
     echo -n "  Psiphon connection:   "
     if container_running; then
         local connected=""
-        connected=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "Connected to Psiphon" 2>/dev/null || echo "0")
-        if [ "$connected" -gt 0 ]; then
+        connected=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "Connected to Psiphon" 2>/dev/null | head -1 || echo "0")
+        connected=${connected:-0}
+        if [ "$connected" -gt 0 ] 2>/dev/null; then
             echo -e "${GREEN}OK${NC} (Connected to Psiphon network)"
         else
             local info_lines=""
-            info_lines=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[INFO\]" 2>/dev/null || echo "0")
-            if [ "$info_lines" -gt 0 ]; then
+            info_lines=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[INFO\]" 2>/dev/null | head -1 || echo "0")
+            info_lines=${info_lines:-0}
+            if [ "$info_lines" -gt 0 ] 2>/dev/null; then
                 echo -e "${YELLOW}CONNECTING${NC} - Establishing connection..."
                 warnings=$((warnings + 1))
             else
@@ -1665,8 +1667,9 @@ health_check() {
     echo -n "  Stats output:         "
     if container_running; then
         local stats_count=""
-        stats_count=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[STATS\]" 2>/dev/null || echo "0")
-        if [ "$stats_count" -gt 0 ]; then
+        stats_count=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[STATS\]" 2>/dev/null | head -1 || echo "0")
+        stats_count=${stats_count:-0}
+        if [ "$stats_count" -gt 0 ] 2>/dev/null; then
             echo -e "${GREEN}OK${NC} (${stats_count} entries)"
         else
             echo -e "${YELLOW}NONE${NC} - May need restart with -v flag"
