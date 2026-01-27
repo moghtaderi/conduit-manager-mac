@@ -1994,10 +1994,17 @@ open_menubar_app() {
     echo "══════════════════════════════════════════════════════"
     echo ""
 
-    local app_path="/Applications/Conduit.app"
+    # Check multiple possible locations for the menu bar app
+    local app_path=""
+    if [ -d "${HOME}/conduit-manager/Conduit.app" ]; then
+        app_path="${HOME}/conduit-manager/Conduit.app"
+    elif [ -d "/Applications/Conduit.app" ]; then
+        app_path="/Applications/Conduit.app"
+    fi
 
-    if [ -d "$app_path" ]; then
+    if [ -n "$app_path" ]; then
         echo -e "${GREEN}✔ Menu bar app is installed${NC}"
+        echo "  Location: $app_path"
         echo ""
         echo "Opening Conduit menu bar app..."
         open "$app_path"
