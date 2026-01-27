@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.1.0"                                          # Script version
+readonly VERSION="1.2.0"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -586,8 +586,11 @@ restore_key() {
 # ==============================================================================
 
 # print_header: Display the application banner
+# Uses escape sequences to clear both screen and scrollback buffer for clean TUI
 print_header() {
-    clear
+    # Clear screen and scrollback buffer for proper TUI experience
+    # \033[2J = clear screen, \033[3J = clear scrollback, \033[H = cursor home
+    printf '\033[2J\033[3J\033[H'
     echo -e "${CYAN}"
     echo "  ██████╗ ██████╗ ███╗   ██╗██████╗ ██╗   ██╗██╗████████╗"
     echo " ██╔════╝██╔═══██╗████╗  ██║██╔══██╗██║   ██║██║╚══██╔══╝"
@@ -851,7 +854,8 @@ view_dashboard() {
 
     tput smcup 2>/dev/null || true
     echo -ne "\033[?25l"
-    clear
+    # Clear screen and scrollback buffer
+    printf '\033[2J\033[3J\033[H'
 
     while [ "$stop_dashboard" -eq 0 ]; do
         tput cup 0 0 2>/dev/null || printf "\033[H"
@@ -974,7 +978,8 @@ view_dashboard() {
 # view_logs: Stream container logs in real-time
 view_logs() {
     log_info "Log view started"
-    clear
+    # Clear screen and scrollback buffer
+    printf '\033[2J\033[3J\033[H'
     echo -e "${CYAN}Streaming Logs (Press Ctrl+C to Exit)...${NC}"
     echo "------------------------------------------------"
 
@@ -1055,7 +1060,8 @@ show_node_info() {
     read -n 1 -s -r -p "Press any key to return..."
 }
 
-# uninstall_all: Completely remove the container, volume, and network
+# uninstall_all: Completely remove the container, volume, network, image, and logs
+# After uninstall completes, the script exits (does not return to menu)
 uninstall_all() {
     print_header
     echo -e "${RED}═══ UNINSTALL CONDUIT ═══${NC}"
@@ -1064,20 +1070,41 @@ uninstall_all() {
     echo "  - The Conduit container"
     echo "  - The conduit-data Docker volume (node identity!)"
     echo "  - The conduit-network Docker network"
-    echo ""
-    echo -e "${BOLD}Your backup keys in ${BACKUP_DIR} will NOT be deleted.${NC}"
+    echo "  - The Docker image"
+    echo "  - The log file (~/.conduit-manager.log)"
     echo ""
 
     # Check for existing backups
     local has_backup=false
-    if [ -d "$BACKUP_DIR" ] && [ -n "$(ls -A "$BACKUP_DIR"/*.json 2>/dev/null)" ]; then
-        has_backup=true
-        echo -e "${GREEN}✔ You have backup keys available for recovery.${NC}"
+    local backup_count=0
+    if [ -d "$BACKUP_DIR" ]; then
+        backup_count=$(find "$BACKUP_DIR" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$backup_count" -gt 0 ]; then
+            has_backup=true
+        fi
+    fi
+
+    if [ "$has_backup" = true ]; then
+        echo -e "${GREEN}✔ You have ${backup_count} backup key(s) in ${BACKUP_DIR}${NC}"
     else
         echo -e "${YELLOW}⚠ You have NO backup keys. Your node identity will be LOST.${NC}"
         echo "  Consider running 'Backup Key' first!"
     fi
     echo ""
+
+    # Ask about backup deletion
+    local delete_backups=false
+    if [ "$has_backup" = true ]; then
+        echo -e "${BOLD}Do you want to delete your backup keys as well?${NC}"
+        read -p "Delete backups? (y/N): " delete_backup_choice
+        if [[ "$delete_backup_choice" =~ ^[Yy]$ ]]; then
+            delete_backups=true
+            echo -e "${RED}⚠ Backups will be PERMANENTLY DELETED${NC}"
+        else
+            echo -e "${GREEN}✔ Backups will be preserved${NC}"
+        fi
+        echo ""
+    fi
 
     read -p "Are you sure you want to uninstall? (type 'yes' to confirm): " confirm
 
@@ -1088,7 +1115,7 @@ uninstall_all() {
     fi
 
     echo ""
-    log_info "Uninstall initiated by user"
+    log_info "Uninstall initiated by user (delete_backups=$delete_backups)"
 
     # Stop and remove container
     echo "Stopping container..."
@@ -1105,20 +1132,43 @@ uninstall_all() {
     echo "Removing network..."
     docker network rm "$NETWORK_NAME" 2>/dev/null || true
 
-    log_info "Uninstall completed"
+    # Remove Docker image
+    echo "Removing Docker image..."
+    docker rmi "$IMAGE" 2>/dev/null || true
+
+    # Remove log file
+    echo "Removing log file..."
+    rm -f "$LOG_FILE" 2>/dev/null || true
+
+    # Optionally remove backups
+    if [ "$delete_backups" = true ] && [ -d "$BACKUP_DIR" ]; then
+        echo "Removing backup keys..."
+        rm -rf "$BACKUP_DIR" 2>/dev/null || true
+    fi
 
     echo ""
-    echo -e "${GREEN}✔ Uninstall complete${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}✔ Uninstall complete - All Conduit data removed${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
     echo ""
-    if [ "$has_backup" = true ]; then
+
+    if [ "$delete_backups" = false ] && [ "$has_backup" = true ]; then
         echo -e "Your backup keys are preserved in: ${CYAN}${BACKUP_DIR}${NC}"
         echo "You can use these to restore your node identity after reinstalling."
+        echo ""
     fi
+
+    echo "To reinstall, run:"
+    echo -e "  ${CYAN}curl -L -o conduit-mac.sh https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/conduit-mac.sh && chmod +x conduit-mac.sh && ./conduit-mac.sh${NC}"
     echo ""
-    read -n 1 -s -r -p "Press any key to return..."
+    echo -e "${CYAN}Goodbye!${NC}"
+
+    # Exit script completely - do not return to menu
+    exit 0
 }
 
-# check_for_updates: Check if a newer version of the script is available
+# check_for_updates: Check if a newer version is available and auto-update if requested
+# Downloads latest script from GitHub, replaces current script, and re-executes
 check_for_updates() {
     print_header
     echo -e "${BOLD}CHECK FOR UPDATES${NC}"
@@ -1129,27 +1179,114 @@ check_for_updates() {
     echo "Checking for updates..."
     echo ""
 
+    local github_url="https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/conduit-mac.sh"
+
     # Try to fetch the latest version from GitHub
     local remote_version=""
-    remote_version=$(curl -sL --max-time 10 "https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/conduit-mac.sh" 2>/dev/null | grep "^readonly VERSION=" | head -1 | cut -d'"' -f2) || remote_version=""
+    remote_version=$(curl -sL --max-time 10 "$github_url" 2>/dev/null | grep "^readonly VERSION=" | head -1 | cut -d'"' -f2) || remote_version=""
 
     if [ -z "$remote_version" ]; then
         echo -e "${YELLOW}Could not check for updates.${NC}"
         echo "Check your internet connection or visit:"
         echo "  https://github.com/moghtaderi/conduit-manager-mac"
-    elif [ "$remote_version" = "$VERSION" ]; then
-        echo -e "${GREEN}✔ You are running the latest version.${NC}"
-    else
-        echo -e "${YELLOW}A new version is available: ${remote_version}${NC}"
         echo ""
-        echo "To update, run:"
-        echo -e "  ${CYAN}curl -L -o conduit-mac.sh https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/conduit-mac.sh${NC}"
-        echo -e "  ${CYAN}chmod +x conduit-mac.sh${NC}"
+        echo "══════════════════════════════════════════════════════"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 0
+    fi
+
+    if [ "$remote_version" = "$VERSION" ]; then
+        echo -e "${GREEN}✔ You are running the latest version.${NC}"
+        echo ""
+        echo "══════════════════════════════════════════════════════"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 0
+    fi
+
+    # New version available - offer auto-update
+    echo -e "${YELLOW}═══════════════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}  NEW VERSION AVAILABLE: ${remote_version}${NC}"
+    echo -e "${YELLOW}═══════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "Current: ${RED}${VERSION}${NC}  →  Latest: ${GREEN}${remote_version}${NC}"
+    echo ""
+    read -p "Do you want to automatically update now? (y/N): " update_choice
+
+    if [[ ! "$update_choice" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "Update cancelled. To manually update later, run:"
+        echo -e "  ${CYAN}curl -L -o conduit-mac.sh ${github_url} && chmod +x conduit-mac.sh${NC}"
+        echo ""
+        read -n 1 -s -r -p "Press any key to return..."
+        return 0
     fi
 
     echo ""
-    echo "══════════════════════════════════════════════════════"
-    read -n 1 -s -r -p "Press any key to return..."
+    echo "Downloading latest version..."
+    log_info "Auto-update initiated: $VERSION -> $remote_version"
+
+    # Get the path to the currently running script
+    local script_path=""
+    script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+    # Create a temporary file for the new script
+    local temp_script=""
+    temp_script=$(mktemp "${TMPDIR:-/tmp}/conduit-mac-update.XXXXXX")
+
+    # Download the new script
+    if ! curl -sL --max-time 30 -o "$temp_script" "$github_url"; then
+        echo -e "${RED}✘ Download failed${NC}"
+        rm -f "$temp_script" 2>/dev/null
+        log_error "Auto-update download failed"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
+
+    # Verify the download is a valid bash script
+    if ! head -1 "$temp_script" | grep -q "^#!/bin/bash"; then
+        echo -e "${RED}✘ Downloaded file is not a valid script${NC}"
+        rm -f "$temp_script" 2>/dev/null
+        log_error "Auto-update verification failed - invalid script"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
+
+    # Verify syntax of the new script
+    if ! bash -n "$temp_script" 2>/dev/null; then
+        echo -e "${RED}✘ Downloaded script has syntax errors${NC}"
+        rm -f "$temp_script" 2>/dev/null
+        log_error "Auto-update verification failed - syntax errors"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
+
+    echo -e "${GREEN}✔ Download verified${NC}"
+    echo ""
+
+    # Replace the current script
+    echo "Installing update..."
+    if ! mv "$temp_script" "$script_path"; then
+        echo -e "${RED}✘ Failed to install update${NC}"
+        rm -f "$temp_script" 2>/dev/null
+        log_error "Auto-update install failed - could not replace script"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
+
+    # Make it executable
+    chmod +x "$script_path"
+
+    log_info "Auto-update completed: $VERSION -> $remote_version"
+
+    echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}✔ Update installed successfully!${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "Restarting with new version..."
+    echo ""
+
+    # Re-execute the updated script
+    exec "$script_path"
 }
 
 # ==============================================================================
