@@ -548,18 +548,6 @@ restore_key() {
     echo "Stopping Conduit..."
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
 
-    # Backup current key if exists
-    local current_key
-    current_key=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null) || current_key=""
-
-    if [ -n "$current_key" ]; then
-        local timestamp
-        timestamp=$(date '+%Y%m%d_%H%M%S')
-        mkdir -p "$BACKUP_DIR"
-        echo "$current_key" > "$BACKUP_DIR/conduit_key_pre_restore_${timestamp}.json"
-        echo "  Current key backed up to: conduit_key_pre_restore_${timestamp}.json"
-    fi
-
     # Restore the key using a temporary container
     # Also fix ownership to UID 1000 (conduit user inside container)
     echo "Restoring key..."
