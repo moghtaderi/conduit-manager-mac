@@ -1,80 +1,250 @@
-# Psiphon Conduit Manager for macOS
+<h1 align="center">🌐 Psiphon Conduit Manager</h1>
+<p align="center"><strong>macOS Edition</strong></p>
 
-Help people in censored regions access the free internet by running a [Psiphon Conduit](https://conduit.psiphon.ca/) proxy node on your Mac.
+<p align="center">
+  Help people in censored regions access the free internet.<br>
+  Run a <a href="https://conduit.psiphon.ca/">Psiphon Conduit</a> proxy node on your Mac.
+</p>
 
-## Quick Start
+<p align="center">
+  <a href="#-quick-start">English</a> · <a href="#-نصب-سریع">فارسی</a>
+</p>
 
-### 1. Install Docker Desktop
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-macOS-blue" alt="macOS">
+  <img src="https://img.shields.io/badge/requires-Docker%20Desktop-blue" alt="Docker">
+  <img src="https://img.shields.io/github/v/release/moghtaderi/conduit-manager-mac" alt="Release">
+</p>
 
-Download and install from: https://www.docker.com/products/docker-desktop/
+---
 
-### 2. Install Conduit Manager
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| 🖥️ **Menu Bar App** | Native macOS app - Start/Stop with one click |
+| 📊 **Live Stats** | See connected clients & traffic in real-time |
+| 🔒 **Security Hardened** | Read-only filesystem, isolated network, seccomp |
+| 🐳 **Docker Status** | Auto-detects if Docker is running |
+| 🌙 **Dark Mode** | Works perfectly in light and dark mode |
+
+---
+
+## 🚀 Quick Start
+
+### Step 1: Install Docker Desktop
+
+Download from **[docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)**
+
+### Step 2: Install Conduit Manager
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
 ```
 
-### 3. Run Initial Setup
+### Step 3: Run Setup
 
 ```bash
 ~/conduit-manager/conduit-mac.sh
 ```
 
-### 4. Recommended Setup Steps
+### Step 4: Configure
 
-When the menu appears:
+| Step | Press | What it does |
+|:----:|:-----:|--------------|
+| 1️⃣ | `7` | Set your CPU & RAM limits |
+| 2️⃣ | `6` | Install the Conduit service |
+| 3️⃣ | `m` | Open the Menu Bar App |
 
-1. **Option 7** → Set your CPU/RAM limits (recommended first)
-2. **Option 6** → Configure and install the Conduit service
-3. **Option m** → Open the Menu Bar App for easy control
-
-That's it! Your Conduit node is now running.
+✅ **Done!** Your node is now helping people access the free internet.
 
 ---
 
-## Menu Bar App
+## 🖥️ Menu Bar App
 
-After setup, use the menu bar app for quick control:
+The menu bar app gives you quick control without opening Terminal:
 
-```bash
-open ~/conduit-manager/Conduit.app
+```
+┌─────────────────────────────┐
+│ ● Conduit: Running          │
+│ Clients: 5 connected        │
+│ Traffic: ↑ 1.2 GB  ↓ 3.4 GB │
+├─────────────────────────────┤
+│ ↻ Restart                   │
+│ ■ Stop                      │
+├─────────────────────────────┤
+│ Open Terminal Manager...    │
+│ Path: ~/conduit-manager/... │
+├─────────────────────────────┤
+│ Quit                        │
+└─────────────────────────────┘
 ```
 
-Features:
-- Start/Stop/Restart with one click
-- See connected clients and traffic stats
-- Works in light and dark mode
+### Menu Bar Icons
 
-**Tip:** Add to Login Items (System Settings → General → Login Items) to start automatically.
+| Icon | Meaning |
+|:----:|---------|
+| 🌐 (filled) | Conduit is **running** |
+| 🌐 (outline) | Conduit is **stopped** |
+| ⚠️ (warning) | Docker is **not running** |
 
----
+### Start at Login
 
-## CLI Menu Options
-
-| Option | Description |
-|--------|-------------|
-| **1** | Start / Restart service |
-| **2** | Stop service |
-| **3** | Live dashboard (real-time stats) |
-| **4** | View logs |
-| **5** | Health check |
-| **6** | Reconfigure (re-install) |
-| **7** | Set CPU/RAM limits |
-| **8** | Security info |
-| **9** | Node identity |
-| **b** | Backup node key |
-| **r** | Restore node key |
-| **u** | Check for updates |
-| **m** | Open Menu Bar App |
-| **x** | Uninstall |
+System Settings → General → Login Items → Add `Conduit.app`
 
 ---
 
-## Uninstall
+## ⌨️ CLI Menu Options
 
-From the CLI menu, select **x** (Uninstall) and follow the prompts.
+```
+╔═══════════════════════════════════════╗
+║      PSIPHON CONDUIT MANAGER          ║
+╚═══════════════════════════════════════╝
 
-Or manually:
+ Service
+   1. ▶  Start / Restart
+   2. ⏹  Stop Service
+   3. 📊 Live Dashboard
+   4. 📜 View Logs
+   5. 🩺 Health Check
+
+ Configuration
+   6. ⚙  Reconfigure
+   7. 📈 Resource Limits
+   8. 🔒 Security Settings
+   9. 🆔 Node Identity
+
+ Backup & Maintenance
+   b. 💾 Backup Key
+   r. 📥 Restore Key
+   u. 🔄 Check for Updates
+   x. 🗑  Uninstall
+
+ Menu Bar App
+   m. 🖥  Open Menu Bar App
+
+   0. 🚪 Exit
+```
+
+---
+
+## 🔒 Security
+
+Your Mac is fully protected:
+
+| Protection | What it means |
+|------------|---------------|
+| 📁 Read-only filesystem | Container can't write to your disk |
+| 🌐 Isolated network | No access to your local network |
+| ⬇️ Dropped capabilities | Minimal Linux privileges |
+| 📊 Resource limits | CPU & RAM are capped |
+| 🛡️ Seccomp filtering | Dangerous syscalls blocked |
+
+---
+
+## 🗑️ Uninstall
+
+**Easy way:** Press `x` in the CLI menu
+
+**Manual way:**
+```bash
+docker stop conduit-mac && docker rm conduit-mac
+docker volume rm conduit-data
+docker network rm conduit-network
+rm -rf ~/conduit-manager ~/.conduit-*
+```
+
+---
+
+<div dir="rtl">
+
+## 🚀 نصب سریع
+
+### مرحله ۱: نصب Docker Desktop
+
+از **[docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)** دانلود کنید
+
+### مرحله ۲: نصب Conduit Manager
+
+</div>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
+```
+
+<div dir="rtl">
+
+### مرحله ۳: اجرای برنامه
+
+</div>
+
+```bash
+~/conduit-manager/conduit-mac.sh
+```
+
+<div dir="rtl">
+
+### مرحله ۴: پیکربندی
+
+| مرحله | کلید | توضیح |
+|:-----:|:----:|-------|
+| ۱ | `7` | تنظیم محدودیت CPU و RAM |
+| ۲ | `6` | نصب سرویس Conduit |
+| ۳ | `m` | باز کردن برنامه Menu Bar |
+
+✅ **تمام!** نود شما اکنون فعال است و به دیگران کمک می‌کند.
+
+---
+
+## 🖥️ برنامه Menu Bar
+
+کنترل سریع بدون نیاز به Terminal:
+
+</div>
+
+```
+┌─────────────────────────────┐
+│ ● Conduit: Running          │  ← وضعیت
+│ Clients: 5 connected        │  ← تعداد کاربران
+│ Traffic: ↑ 1.2 GB  ↓ 3.4 GB │  ← ترافیک
+├─────────────────────────────┤
+│ ↻ Restart                   │  ← ریستارت
+│ ■ Stop                      │  ← توقف
+└─────────────────────────────┘
+```
+
+<div dir="rtl">
+
+### آیکون‌های Menu Bar
+
+| آیکون | معنی |
+|:-----:|------|
+| 🌐 (پر) | Conduit **در حال اجراست** |
+| 🌐 (خالی) | Conduit **متوقف است** |
+| ⚠️ (هشدار) | Docker **اجرا نیست** |
+
+---
+
+## 🔒 امنیت
+
+مک شما کاملاً محافظت شده است:
+
+| محافظت | توضیح |
+|--------|-------|
+| 📁 فایل‌سیستم فقط‌خواندنی | کانتینر نمی‌تواند روی دیسک بنویسد |
+| 🌐 شبکه ایزوله | دسترسی به شبکه محلی ندارد |
+| ⬇️ امتیازات محدود | حداقل دسترسی‌های لینوکس |
+| 📊 محدودیت منابع | CPU و RAM محدود شده |
+
+---
+
+## 🗑️ حذف برنامه
+
+**روش آسان:** در منوی CLI کلید `x` را بزنید
+
+**روش دستی:**
+
+</div>
 
 ```bash
 docker stop conduit-mac && docker rm conduit-mac
@@ -85,36 +255,11 @@ rm -rf ~/conduit-manager ~/.conduit-*
 
 ---
 
-## Security
-
-The container runs with:
-- Read-only filesystem
-- Isolated network (no host access)
-- Dropped capabilities
-- CPU/RAM limits
-- Seccomp syscall filtering
-
-Your Mac is protected. The container can only relay proxy traffic.
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| Docker not running | Open Docker Desktop, wait for it to start |
-| Container won't start | Run option **5** (Health Check) to diagnose |
-| Resource limits not applying | Use option **6** to recreate the container |
-
----
-
-## Credits
+## 🙏 Credits
 
 - [Psiphon](https://psiphon.ca/) - Psiphon Conduit project
 - [SamNet-dev/conduit-manager](https://github.com/SamNet-dev/conduit-manager) - Original Linux script
 
----
-
-## License
+## 📄 License
 
 MIT
