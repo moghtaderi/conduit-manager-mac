@@ -432,24 +432,15 @@ remove_container() {
 # Returns:
 #   Node ID string or empty if not found
 get_node_id() {
-    # Get the volume mountpoint
-    local mountpoint
-    mountpoint=$(docker volume inspect "$VOLUME_NAME" --format '{{ .Mountpoint }}' 2>/dev/null) || mountpoint=""
+    # On macOS with Docker Desktop, we can't access volume mountpoints directly
+    # because they exist inside the Docker VM. Always use a container to read.
+    local key_content
+    key_content=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null) || key_content=""
 
-    if [ -z "$mountpoint" ]; then
-        # Try using a container to read the file instead
-        local key_content
-        key_content=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null) || key_content=""
-
-        if [ -n "$key_content" ]; then
-            # Extract privateKeyBase64, decode, take last 32 bytes, encode base64
-            echo "$key_content" | grep "privateKeyBase64" | awk -F'"' '{print $4}' | base64 -d 2>/dev/null | tail -c 32 | base64 | tr -d '=\n' 2>/dev/null
-        fi
-        return
-    fi
-
-    if [ -f "$mountpoint/conduit_key.json" ]; then
-        cat "$mountpoint/conduit_key.json" | grep "privateKeyBase64" | awk -F'"' '{print $4}' | base64 -d 2>/dev/null | tail -c 32 | base64 | tr -d '=\n' 2>/dev/null
+    if [ -n "$key_content" ]; then
+        # Extract privateKeyBase64, decode, take last 32 bytes, encode base64
+        # This derives the public node ID from the private key
+        echo "$key_content" | grep "privateKeyBase64" | awk -F'"' '{print $4}' | base64 -d 2>/dev/null | tail -c 32 | base64 | tr -d '=\n' 2>/dev/null
     fi
 }
 
