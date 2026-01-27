@@ -55,6 +55,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statsItem.tag = 102
         menu.addItem(statsItem)
 
+        // Traffic stats
+        let trafficItem = NSMenuItem(title: "Traffic: -", action: nil, keyEquivalent: "")
+        trafficItem.tag = 103
+        menu.addItem(trafficItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Control items
@@ -115,6 +120,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     statsItem.title = "Clients: \(stats.connected) connected"
                 } else {
                     statsItem.title = "Clients: -"
+                }
+            }
+
+            // Traffic stats
+            if let trafficItem = menu.item(withTag: 103) {
+                if isRunning, let traffic = manager.getTraffic() {
+                    trafficItem.title = "Traffic: ↑ \(traffic.upload)  ↓ \(traffic.download)"
+                } else {
+                    trafficItem.title = "Traffic: -"
                 }
             }
 
@@ -281,6 +295,59 @@ class ConduitManager {
                     if let connected = Int(numStr) {
                         return (connected, 0)
                     }
+                }
+            }
+        }
+        return nil
+    }
+
+    func getTraffic() -> (upload: String, download: String)? {
+        let output = runCommand("docker", arguments: ["logs", "--tail", "50", containerName])
+
+        // Parse STATS line for traffic data
+        // Format: [STATS] Connected: X | Connecting: Y | Up: 1.2 GB | Down: 3.4 GB
+        let lines = output.components(separatedBy: "\n")
+        for line in lines.reversed() {
+            if line.contains("[STATS]") {
+                var upload = "-"
+                var download = "-"
+
+                // Extract Up: value
+                if let upRange = line.range(of: "Up: ") {
+                    let start = upRange.upperBound
+                    let remaining = String(line[start...])
+                    // Find the end (either | or end of line)
+                    if let pipeIndex = remaining.firstIndex(of: "|") {
+                        upload = String(remaining[..<pipeIndex]).trimmingCharacters(in: .whitespaces)
+                    } else {
+                        // Take until end or next space after the value
+                        let parts = remaining.components(separatedBy: " ")
+                        if parts.count >= 2 {
+                            upload = "\(parts[0]) \(parts[1])"
+                        }
+                    }
+                }
+
+                // Extract Down: value
+                if let downRange = line.range(of: "Down: ") {
+                    let start = downRange.upperBound
+                    let remaining = String(line[start...])
+                    // Find the end (either | or end of line)
+                    if let pipeIndex = remaining.firstIndex(of: "|") {
+                        download = String(remaining[..<pipeIndex]).trimmingCharacters(in: .whitespaces)
+                    } else {
+                        // Take until end
+                        let parts = remaining.components(separatedBy: " ")
+                        if parts.count >= 2 {
+                            download = "\(parts[0]) \(parts[1])"
+                        } else {
+                            download = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                    }
+                }
+
+                if upload != "-" || download != "-" {
+                    return (upload, download)
                 }
             }
         }
