@@ -1796,13 +1796,16 @@ uninstall_all() {
     print_header
     echo -e "${RED}═══ UNINSTALL CONDUIT ═══${NC}"
     echo ""
-    echo -e "${YELLOW}WARNING: This will remove:${NC}"
-    echo "  - The Conduit container"
-    echo "  - The conduit-data Docker volume (node identity!)"
-    echo "  - The conduit-network Docker network"
-    echo "  - The Docker image"
-    echo "  - The log file (~/.conduit-manager.log)"
-    echo "  - The config file (~/.conduit-config)"
+    echo -e "${RED}WARNING: This will remove:${NC}"
+    echo -e "${RED}  - The Conduit container${NC}"
+    echo -e "${RED}  - The conduit-data Docker volume (node identity!)${NC}"
+    echo -e "${RED}  - The conduit-network Docker network${NC}"
+    echo -e "${RED}  - The Docker image${NC}"
+    echo -e "${RED}  - The log file (~/.conduit-manager.log)${NC}"
+    echo -e "${RED}  - The config file (~/.conduit-config)${NC}"
+    echo -e "${RED}  - The seccomp profile (~/.conduit-seccomp.json)${NC}"
+    echo -e "${RED}  - The application folder (~/conduit-manager/)${NC}"
+    echo -e "${RED}  - The symlink (/usr/local/bin/conduit)${NC}"
     echo ""
 
     # Check for existing backups
@@ -1837,7 +1840,8 @@ uninstall_all() {
         echo ""
     fi
 
-    read -p "Are you sure you want to uninstall? (type 'yes' to confirm): " confirm
+    echo -e "${RED}${BOLD}Are you sure you want to uninstall?${NC}"
+    read -p "Type 'yes' to confirm: " confirm
 
     if [ "$confirm" != "yes" ]; then
         echo "Uninstall cancelled."
@@ -1867,16 +1871,27 @@ uninstall_all() {
     echo "Removing Docker image..."
     docker rmi "$IMAGE" 2>/dev/null || true
 
-    # Remove log file and config file
-    echo "Removing log and config files..."
+    # Remove log file, config file, and seccomp profile
+    echo "Removing log, config, and seccomp files..."
     rm -f "$LOG_FILE" 2>/dev/null || true
     rm -f "$CONFIG_FILE" 2>/dev/null || true
+    rm -f "$SECCOMP_FILE" 2>/dev/null || true
+
+    # Remove symlink if it exists
+    if [ -L "/usr/local/bin/conduit" ]; then
+        echo "Removing symlink..."
+        sudo rm -f "/usr/local/bin/conduit" 2>/dev/null || true
+    fi
 
     # Optionally remove backups
     if [ "$delete_backups" = true ] && [ -d "$BACKUP_DIR" ]; then
         echo "Removing backup keys..."
         rm -rf "$BACKUP_DIR" 2>/dev/null || true
     fi
+
+    # Remove the application folder (script and menu bar app)
+    echo "Removing application folder..."
+    rm -rf "${HOME}/conduit-manager" 2>/dev/null || true
 
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
