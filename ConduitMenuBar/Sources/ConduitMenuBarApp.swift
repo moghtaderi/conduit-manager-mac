@@ -102,6 +102,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Menu Setup
 
+    /// Helper to create a non-interactive menu item that doesn't appear grayed out
+    func createInfoMenuItem(title: String, tag: Int) -> NSMenuItem {
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.menuFont(ofSize: 13),
+            .foregroundColor: NSColor.labelColor
+        ])
+        item.tag = tag
+        return item
+    }
+
+    /// Helper to update an info menu item's attributed title
+    func updateInfoMenuItem(_ item: NSMenuItem, title: String, color: NSColor = .labelColor) {
+        item.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.menuFont(ofSize: 13),
+            .foregroundColor: color
+        ])
+    }
+
     /// Builds the dropdown menu with all items.
     /// Menu items are tagged with IDs for later updates.
     func setupMenu() {
@@ -110,29 +129,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // --- Status Section ---
 
         // Main status line (tag 100)
-        let statusItem = NSMenuItem(title: "○ Conduit: Checking...", action: nil, keyEquivalent: "")
-        statusItem.tag = 100
+        let statusItem = createInfoMenuItem(title: "○ Conduit: Checking...", tag: 100)
         menu.addItem(statusItem)
 
         // Docker status message - hidden unless Docker has issues (tag 101)
-        let dockerItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        dockerItem.tag = 101
+        let dockerItem = createInfoMenuItem(title: "", tag: 101)
         dockerItem.isHidden = true
         menu.addItem(dockerItem)
 
         // Client connection count (tag 102)
-        let statsItem = NSMenuItem(title: "Clients: -", action: nil, keyEquivalent: "")
-        statsItem.tag = 102
+        let statsItem = createInfoMenuItem(title: "Clients: -", tag: 102)
         menu.addItem(statsItem)
 
         // Traffic statistics (tag 103)
-        let trafficItem = NSMenuItem(title: "Traffic: -", action: nil, keyEquivalent: "")
-        trafficItem.tag = 103
+        let trafficItem = createInfoMenuItem(title: "Traffic: -", tag: 103)
         menu.addItem(trafficItem)
 
         // Uptime (tag 104)
-        let uptimeItem = NSMenuItem(title: "Uptime: -", action: nil, keyEquivalent: "")
-        uptimeItem.tag = 104
+        let uptimeItem = createInfoMenuItem(title: "Uptime: -", tag: 104)
         menu.addItem(uptimeItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -237,11 +251,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let statusMenuItem = menu.item(withTag: 100) {
                 switch dockerStatus {
                 case .notInstalled:
-                    statusMenuItem.title = "⚠ Docker Not Installed"
+                    updateInfoMenuItem(statusMenuItem, title: "⚠ Docker Not Installed", color: .systemOrange)
                 case .notRunning:
-                    statusMenuItem.title = "⚠ Docker Not Running"
+                    updateInfoMenuItem(statusMenuItem, title: "⚠ Docker Not Running", color: .systemOrange)
                 case .running:
-                    statusMenuItem.title = isRunning ? "● Conduit: Running" : "○ Conduit: Stopped"
+                    if isRunning {
+                        updateInfoMenuItem(statusMenuItem, title: "● Conduit: Running", color: .systemGreen)
+                    } else {
+                        updateInfoMenuItem(statusMenuItem, title: "○ Conduit: Stopped", color: .secondaryLabelColor)
+                    }
                 }
             }
 
@@ -249,10 +267,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let dockerItem = menu.item(withTag: 101) {
                 switch dockerStatus {
                 case .notInstalled:
-                    dockerItem.title = "   Install Docker Desktop to use Conduit"
+                    updateInfoMenuItem(dockerItem, title: "   Install Docker Desktop to use Conduit", color: .secondaryLabelColor)
                     dockerItem.isHidden = false
                 case .notRunning:
-                    dockerItem.title = "   Please start Docker Desktop"
+                    updateInfoMenuItem(dockerItem, title: "   Please start Docker Desktop", color: .secondaryLabelColor)
                     dockerItem.isHidden = false
                 case .running:
                     dockerItem.isHidden = true
@@ -263,13 +281,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let statsItem = menu.item(withTag: 102) {
                 if isRunning, let stats = manager.getStats() {
                     if stats.connecting > 0 {
-                        statsItem.title = "Clients: \(stats.connected) connected (\(stats.connecting) connecting)"
+                        updateInfoMenuItem(statsItem, title: "Clients: \(stats.connected) connected (\(stats.connecting) connecting)")
                     } else {
-                        statsItem.title = "Clients: \(stats.connected) connected"
+                        updateInfoMenuItem(statsItem, title: "Clients: \(stats.connected) connected")
                     }
                     statsItem.isHidden = false
                 } else {
-                    statsItem.title = "Clients: -"
+                    updateInfoMenuItem(statsItem, title: "Clients: -")
                     statsItem.isHidden = dockerStatus != .running
                 }
             }
@@ -277,10 +295,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Traffic stats (tag 103)
             if let trafficItem = menu.item(withTag: 103) {
                 if isRunning, let traffic = manager.getTraffic() {
-                    trafficItem.title = "Traffic: ↑ \(traffic.upload)  ↓ \(traffic.download)"
+                    updateInfoMenuItem(trafficItem, title: "Traffic: ↑ \(traffic.upload)  ↓ \(traffic.download)")
                     trafficItem.isHidden = false
                 } else {
-                    trafficItem.title = "Traffic: -"
+                    updateInfoMenuItem(trafficItem, title: "Traffic: -")
                     trafficItem.isHidden = dockerStatus != .running
                 }
             }
@@ -288,10 +306,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Uptime (tag 104)
             if let uptimeItem = menu.item(withTag: 104) {
                 if isRunning, let uptime = manager.getUptime() {
-                    uptimeItem.title = "Uptime: \(uptime)"
+                    updateInfoMenuItem(uptimeItem, title: "Uptime: \(uptime)")
                     uptimeItem.isHidden = false
                 } else {
-                    uptimeItem.title = "Uptime: -"
+                    updateInfoMenuItem(uptimeItem, title: "Uptime: -")
                     uptimeItem.isHidden = dockerStatus != .running
                 }
             }
