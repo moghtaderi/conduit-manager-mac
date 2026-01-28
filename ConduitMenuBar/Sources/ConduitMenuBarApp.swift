@@ -194,34 +194,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // --- Update Menu Bar Icon ---
         if let button = statusItem?.button {
-            // Choose icon based on status:
-            // - Warning triangle: Docker issues
-            // - Green circle: Conduit running and connected
-            // - Gray circle: Conduit stopped
+            // Icon selection:
+            // - exclamationmark.triangle: Docker issues (template, adapts to light/dark)
+            // - antenna.radiowaves.left.and.right: Running (with green accent)
+            // - antenna.radiowaves.left.and.right.slash: Stopped (template, adapts to light/dark)
             let symbolName: String
-            var tintColor: NSColor? = nil
+            var useMulticolor = false
 
             switch dockerStatus {
             case .notInstalled, .notRunning:
                 symbolName = "exclamationmark.triangle"
             case .running:
-                symbolName = "circle.fill"
-                tintColor = isRunning ? NSColor.systemGreen : NSColor.systemGray
+                if isRunning {
+                    symbolName = "antenna.radiowaves.left.and.right"
+                    useMulticolor = true
+                } else {
+                    symbolName = "antenna.radiowaves.left.and.right.slash"
+                }
             }
 
             if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Conduit") {
-                let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+                var config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+
+                if useMulticolor {
+                    // Use hierarchical rendering with green for the "active" state
+                    let colorConfig = NSImage.SymbolConfiguration(paletteColors: [.systemGreen])
+                    config = config.applying(colorConfig)
+                }
+
                 if let configuredImage = image.withSymbolConfiguration(config) {
-                    // Use template mode only for warning icon, direct color for circle
-                    if dockerStatus == .running {
-                        configuredImage.isTemplate = false
-                        button.image = configuredImage
-                        button.contentTintColor = tintColor
-                    } else {
-                        configuredImage.isTemplate = true
-                        button.image = configuredImage
-                        button.contentTintColor = nil
-                    }
+                    // Template mode for proper light/dark adaptation (except multicolor)
+                    configuredImage.isTemplate = !useMulticolor
+                    button.image = configuredImage
                 }
             }
         }
