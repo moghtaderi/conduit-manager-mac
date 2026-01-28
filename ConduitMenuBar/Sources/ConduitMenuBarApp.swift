@@ -127,6 +127,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         trafficItem.tag = 103
         menu.addItem(trafficItem)
 
+        // Uptime (tag 104)
+        let uptimeItem = NSMenuItem(title: "Uptime: -", action: nil, keyEquivalent: "")
+        uptimeItem.tag = 104
+        menu.addItem(uptimeItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // --- Control Section ---
@@ -252,6 +257,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     trafficItem.title = "Traffic: -"
                     trafficItem.isHidden = dockerStatus != .running
+                }
+            }
+
+            // Uptime (tag 104)
+            if let uptimeItem = menu.item(withTag: 104) {
+                if isRunning, let uptime = manager.getUptime() {
+                    uptimeItem.title = "Uptime: \(uptime)"
+                    uptimeItem.isHidden = false
+                } else {
+                    uptimeItem.title = "Uptime: -"
+                    uptimeItem.isHidden = dockerStatus != .running
                 }
             }
 
@@ -486,6 +502,40 @@ class ConduitManager {
             }
         }
         return nil
+    }
+
+    /// Gets container uptime from Docker.
+    /// Returns a human-readable string like "2h 15m" or "3d 4h".
+    func getUptime() -> String? {
+        let output = runCommand("docker", arguments: ["ps", "--format", "{{.Status}}", "--filter", "name=\(containerName)"])
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Docker status format: "Up 2 hours" or "Up 3 days" or "Up About an hour"
+        guard trimmed.lowercased().hasPrefix("up ") else { return nil }
+
+        // Remove "Up " prefix and clean up
+        var uptime = String(trimmed.dropFirst(3))
+
+        // Handle "About an hour" -> "~1h"
+        if uptime.lowercased().contains("about") {
+            uptime = uptime.replacingOccurrences(of: "About ", with: "~", options: .caseInsensitive)
+            uptime = uptime.replacingOccurrences(of: "an hour", with: "1h", options: .caseInsensitive)
+            uptime = uptime.replacingOccurrences(of: "a minute", with: "1m", options: .caseInsensitive)
+        }
+
+        // Shorten common units for cleaner display
+        uptime = uptime.replacingOccurrences(of: " seconds", with: "s")
+        uptime = uptime.replacingOccurrences(of: " second", with: "s")
+        uptime = uptime.replacingOccurrences(of: " minutes", with: "m")
+        uptime = uptime.replacingOccurrences(of: " minute", with: "m")
+        uptime = uptime.replacingOccurrences(of: " hours", with: "h")
+        uptime = uptime.replacingOccurrences(of: " hour", with: "h")
+        uptime = uptime.replacingOccurrences(of: " days", with: "d")
+        uptime = uptime.replacingOccurrences(of: " day", with: "d")
+        uptime = uptime.replacingOccurrences(of: " weeks", with: "w")
+        uptime = uptime.replacingOccurrences(of: " week", with: "w")
+
+        return uptime.isEmpty ? nil : uptime
     }
 
     /// Parses container logs to extract traffic statistics.
