@@ -69,14 +69,20 @@ The menu bar app gives you quick control without opening Terminal:
 │ ● Conduit: Running          │
 │ Clients: 5 connected        │
 │ Traffic: ↑ 1.2 GB  ↓ 3.4 GB │
+│ Uptime: ~2h                 │
 ├─────────────────────────────┤
-│ ↻ Restart                   │
-│ ■ Stop                      │
+│ ↻ Restart              ⌘S   │
+│ ■ Stop                 ⌘X   │
 ├─────────────────────────────┤
 │ Open Terminal Manager...    │
 │ Path: ~/conduit-manager/... │
 ├─────────────────────────────┤
-│ Quit                        │
+│ Node ID: uOlL1j1zIXY...     │
+│ Max Clients: 250            │
+│ Bandwidth: 15 Mbps          │
+├─────────────────────────────┤
+│ Version 1.5.8               │
+│ Quit                   ⌘Q   │
 └─────────────────────────────┘
 ```
 
@@ -84,8 +90,8 @@ The menu bar app gives you quick control without opening Terminal:
 
 | Icon | Meaning |
 |:----:|---------|
-| 🌐 (filled) | Conduit is **running** |
-| 🌐 (outline) | Conduit is **stopped** |
+| 📡 (green) | Conduit is **running** |
+| 📡 (slashed) | Conduit is **stopped** |
 | ⚠️ (warning) | Docker is **not running** |
 
 ### Start at Login
@@ -139,6 +145,22 @@ Your Mac is fully protected:
 | ⬇️ Dropped capabilities | Minimal Linux privileges |
 | 📊 Resource limits | CPU & RAM are capped |
 | 🛡️ Seccomp filtering | Dangerous syscalls blocked |
+
+---
+
+## ❓ FAQ
+
+### Will updating lose my Node ID?
+
+**No.** Updates only replace the script and menu bar app. Your Node ID is stored in a Docker volume (`conduit-data`) which is preserved during updates.
+
+### What does the Node ID represent?
+
+Your Node ID is a unique cryptographic identifier for your volunteer node. Psiphon uses it to track your node's reputation and contribution history. If you lose it (by uninstalling), you start fresh with a new identity.
+
+### How do I backup my Node ID?
+
+Press `b` in the CLI menu to create a backup. Backups are saved to `~/.conduit-backups/` and can be restored later with `r`.
 
 ---
 
@@ -210,6 +232,10 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 ├─────────────────────────────┤
 │ ↻ Restart                   │  ← ریستارت
 │ ■ Stop                      │  ← توقف
+├─────────────────────────────┤
+│ Node ID: uOlL1j1zIXY...     │  ← شناسه نود
+│ Max Clients: 250            │  ← حداکثر کاربران
+│ Bandwidth: 15 Mbps          │  ← پهنای باند
 └─────────────────────────────┘
 ```
 
@@ -219,8 +245,8 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 | آیکون | معنی |
 |:-----:|------|
-| 🌐 (پر) | Conduit **در حال اجراست** |
-| 🌐 (خالی) | Conduit **متوقف است** |
+| 📡 (سبز) | Conduit **در حال اجراست** |
+| 📡 (خط‌خورده) | Conduit **متوقف است** |
 | ⚠️ (هشدار) | Docker **اجرا نیست** |
 
 ---
