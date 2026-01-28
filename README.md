@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="#-quick-start">English</a> · <a href="#-نصب-سریع">فارسی</a>
+  <a href="#quick-start">English</a> · <a href="#farsi">فارسی</a>
 </p>
 
 <p align="center">
@@ -177,6 +177,8 @@ rm -rf ~/conduit-manager ~/.conduit-*
 ---
 
 <div dir="rtl">
+
+<a id="farsi"></a>
 
 ## نصب سریع
 
