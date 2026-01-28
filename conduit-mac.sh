@@ -506,6 +506,12 @@ verify_image_digest() {
     local expected_digest="$1"
     local image="$2"
 
+    # Skip verification if no digest is configured
+    if [ -z "$expected_digest" ]; then
+        log_info "No digest configured, skipping verification"
+        return 0
+    fi
+
     log_info "Verifying image digest..."
 
     # Get the actual digest of the pulled image
