@@ -60,7 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Properties
 
     /// App version - displayed in menu
-    let appVersion = "1.5.10"
+    let appVersion = "1.6.0"
 
     /// The status bar item that appears in the macOS menu bar
     var statusItem: NSStatusItem?
@@ -102,23 +102,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Menu Setup
 
-    /// Helper to create a non-interactive menu item that doesn't appear grayed out
+    /// Helper to create a non-interactive menu item with a custom view (prevents grayed-out appearance)
     func createInfoMenuItem(title: String, tag: Int) -> NSMenuItem {
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        item.attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: NSFont.menuFont(ofSize: 13),
-            .foregroundColor: NSColor.labelColor
-        ])
         item.tag = tag
+
+        // Use a custom view to prevent the grayed-out disabled appearance
+        let label = NSTextField(labelWithString: title)
+        label.font = NSFont.menuFont(ofSize: 13)
+        label.textColor = NSColor.labelColor
+
+        // Create a container view with proper menu item padding
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 18))
+        label.frame = NSRect(x: 14, y: 0, width: 280, height: 18)
+        container.addSubview(label)
+
+        item.view = container
         return item
     }
 
-    /// Helper to update an info menu item's attributed title
+    /// Helper to update an info menu item's custom view
     func updateInfoMenuItem(_ item: NSMenuItem, title: String, color: NSColor = .labelColor) {
-        item.attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: NSFont.menuFont(ofSize: 13),
-            .foregroundColor: color
-        ])
+        if let container = item.view, let label = container.subviews.first as? NSTextField {
+            label.stringValue = title
+            label.textColor = color
+        }
     }
 
     /// Builds the dropdown menu with all items.
@@ -183,11 +191,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(pathItem)
 
         menu.addItem(NSMenuItem.separator())
-
-        // Node ID - click to copy (tag 400)
-        let nodeIdItem = NSMenuItem(title: "Node ID: -", action: #selector(copyNodeId), keyEquivalent: "")
-        nodeIdItem.tag = 400
-        menu.addItem(nodeIdItem)
 
         // Max clients (tag 401)
         let maxClientsItem = createInfoMenuItem(title: "Max Clients: -", tag: 401)
@@ -345,20 +348,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 downloadItem.isHidden = dockerStatus != .notInstalled
             }
 
-            // Node ID (tag 400)
-            if let nodeIdItem = menu.item(withTag: 400) {
-                if dockerStatus == .running, let nodeId = manager.getNodeId() {
-                    // Truncate for display but store full ID
-                    let displayId = nodeId.count > 20 ? String(nodeId.prefix(20)) + "..." : nodeId
-                    nodeIdItem.title = "Node ID: \(displayId)"
-                    nodeIdItem.isHidden = false
-                    nodeIdItem.isEnabled = true
-                } else {
-                    nodeIdItem.title = "Node ID: -"
-                    nodeIdItem.isHidden = dockerStatus != .running
-                }
-            }
-
             // Max clients (tag 401)
             if let maxClientsItem = menu.item(withTag: 401) {
                 if dockerStatus == .running, let config = manager.getContainerConfig() {
@@ -432,16 +421,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Copies the Node ID to the clipboard.
-    @objc func copyNodeId() {
-        if let nodeId = conduitManager?.getNodeId(), !nodeId.isEmpty {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(nodeId, forType: .string)
-            showNotification(title: "Copied", body: "Node ID copied to clipboard")
-        } else {
-            showNotification(title: "Error", body: "Node ID not available")
-        }
-    }
-
     /// Opens Terminal and runs the conduit-mac.sh script.
     /// Uses AppleScript to control Terminal.app.
     @objc func openTerminal() {
@@ -710,25 +689,6 @@ class ConduitManager {
     }
 
     /// Gets the Node ID from the container's key file.
-    func getNodeId() -> String? {
-        // Use docker exec on the running container (fast) instead of docker run alpine (slow)
-        let output = runCommand("docker", arguments: [
-            "exec", containerName, "cat", "/data/conduit_key.json"
-        ])
-
-        // Extract privateKeyBase64 and derive node ID
-        guard let range = output.range(of: "\"privateKeyBase64\":\"") else { return nil }
-        let start = range.upperBound
-        guard let endRange = output[start...].range(of: "\"") else { return nil }
-        let base64Key = String(output[start..<endRange.lowerBound])
-
-        // Decode base64, take last 32 bytes, re-encode
-        guard let keyData = Data(base64Encoded: base64Key) else { return nil }
-        guard keyData.count >= 32 else { return nil }
-        let last32 = keyData.suffix(32)
-        return last32.base64EncodedString().replacingOccurrences(of: "=", with: "")
-    }
-
     /// Gets container configuration (max-clients and bandwidth).
     func getContainerConfig() -> (maxClients: String, bandwidth: String)? {
         let output = runCommand("docker", arguments: ["inspect", "--format", "{{.Args}}", containerName])
