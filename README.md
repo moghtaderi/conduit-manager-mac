@@ -102,14 +102,14 @@ System Settings → General → Login Items → Add `Conduit-Mac.app`
 ╚═══════════════════════════════════════╝
 
  Service
-   1. ▶  Start / Restart
-   2. ⏹  Stop Service
+   1. ▶️  Start / Restart
+   2. ⏹️  Stop Service
    3. 📊 Live Dashboard
    4. 📜 View Logs
    5. 🩺 Health Check
 
  Configuration
-   6. ⚙  Reconfigure
+   6. 🛠️  Reconfigure
    7. 📈 Resource Limits
    8. 🔒 Security Settings
    9. 🆔 Node Identity
