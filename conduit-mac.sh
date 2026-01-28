@@ -39,8 +39,8 @@ readonly VERSION="1.5.6"                                          # Script versi
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
-readonly IMAGE="ghcr.io/ssmirr/conduit/conduit:d8522a8"          # Docker image to deploy
-readonly IMAGE_DIGEST="sha256:a7c3acdc9ff4b5a2077a983765f0ac905ad11571321c61715181b1cf616379ca"  # Expected SHA256
+readonly IMAGE="ghcr.io/ssmirr/conduit/conduit:2fd31d4"          # Docker image to deploy
+readonly IMAGE_DIGEST=""  # No digest verification for this release
 readonly VOLUME_NAME="conduit-data"                               # Persistent data volume
 readonly NETWORK_NAME="conduit-network"                           # Isolated bridge network
 readonly LOG_FILE="${HOME}/.conduit-manager.log"                  # Local log file path
@@ -1271,7 +1271,11 @@ view_dashboard() {
             local ram="N/A"
             if [ -n "$docker_stats" ]; then
                 cpu=$(echo "$docker_stats" | cut -d'|' -f1)
-                ram=$(echo "$docker_stats" | cut -d'|' -f2)
+                # Parse memory usage and convert from GiB/MiB to GB/MB
+                local raw_ram
+                raw_ram=$(echo "$docker_stats" | cut -d'|' -f2)
+                # Convert GiB to GB and MiB to MB (binary to decimal)
+                ram=$(echo "$raw_ram" | sed 's/GiB/GB/g; s/MiB/MB/g; s/KiB/KB/g')
             fi
 
             # Fetch system stats
