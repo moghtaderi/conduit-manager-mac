@@ -1,0 +1,24 @@
+# Build artifacts
+ConduitMenuBar/.build/
+ConduitMenuBar/Conduit-Mac.app/
+ConduitMenuBar/Conduit-Mac-MenuBar-macOS.zip
+*.zip
+
+# Claude Code settings
+.claude/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# Swift Package Manager
+.swiftpm/
+Packages/
+Package.resolved
