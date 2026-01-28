@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.5.6"                                          # Script version
+readonly VERSION="1.5.7"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -87,6 +87,16 @@ log_message() {
     local message="$2"
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # Rotate log if it exceeds 1MB (1048576 bytes)
+    if [ -f "$LOG_FILE" ]; then
+        local log_size
+        log_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || echo "0")
+        if [ "$log_size" -gt 1048576 ]; then
+            # Keep one backup, rotate current log
+            mv -f "$LOG_FILE" "${LOG_FILE}.old" 2>/dev/null || true
+        fi
+    fi
 
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
 
@@ -757,8 +767,24 @@ restore_key() {
     # Restore the key using a temporary container
     # Also fix ownership to UID 1000 (conduit user inside container)
     echo "Restoring key..."
-    docker run --rm -v "$VOLUME_NAME":/data -v "$(dirname "$backup_file")":/backup alpine \
-        sh -c "cp /backup/$(basename "$backup_file") /data/conduit_key.json && chmod 600 /data/conduit_key.json && chown -R 1000:1000 /data"
+    if ! docker run --rm -v "$VOLUME_NAME":/data -v "$(dirname "$backup_file")":/backup alpine \
+        sh -c "cp /backup/$(basename "$backup_file") /data/conduit_key.json && chmod 600 /data/conduit_key.json && chown -R 1000:1000 /data"; then
+        log_error "Failed to copy key to volume"
+        echo -e "${RED}✘ Failed to restore key - copy operation failed${NC}"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
+
+    # Verify the key was actually written to the volume
+    echo "Verifying restore..."
+    local verify_content=""
+    verify_content=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null) || verify_content=""
+    if [ -z "$verify_content" ] || ! echo "$verify_content" | grep -q "privateKeyBase64"; then
+        log_error "Key verification failed - file not found or invalid"
+        echo -e "${RED}✘ Failed to restore key - verification failed${NC}"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
 
     # Restart container
     echo "Starting Conduit..."
@@ -924,6 +950,9 @@ smart_start() {
             seccomp_opt="--security-opt seccomp=$SECCOMP_FILE"
         fi
 
+        # Calculate PIDs limit based on max_clients (each connection may use threads)
+        local pids_limit=$((max_clients + 50))
+
         if docker run -d \
             --name "$CONTAINER_NAME" \
             --restart unless-stopped \
@@ -937,7 +966,7 @@ smart_start() {
             --memory "$MAX_MEMORY" \
             --cpus "$MAX_CPUS" \
             --memory-swap "$MEMORY_SWAP" \
-            --pids-limit 100 \
+            --pids-limit "$pids_limit" \
             -v "$VOLUME_NAME":/home/conduit/data \
             "$IMAGE" \
             start --max-clients "$max_clients" --bandwidth "$bandwidth" -v > /dev/null 2>&1; then
@@ -1082,6 +1111,21 @@ install_new() {
     echo -e "${YELLOW}Deploying secure container...${NC}"
 
     # --------------------------------------------------------------------------
+    # Pre-deployment: Check network connectivity
+    # --------------------------------------------------------------------------
+    echo -n "Checking network connectivity... "
+    if ! curl -s --connect-timeout 5 --max-time 10 "https://ghcr.io" >/dev/null 2>&1; then
+        echo -e "${RED}FAILED${NC}"
+        log_error "Network connectivity check failed - cannot reach ghcr.io"
+        echo -e "${RED}✘ Cannot reach container registry (ghcr.io)${NC}"
+        echo ""
+        echo "Please check your internet connection and try again."
+        read -n 1 -s -r -p "Press any key to continue..."
+        return 1
+    fi
+    echo -e "${GREEN}OK${NC}"
+
+    # --------------------------------------------------------------------------
     # Pre-deployment: Ensure network exists and remove old container
     # --------------------------------------------------------------------------
     if ! ensure_network_exists; then
@@ -1152,6 +1196,9 @@ install_new() {
         seccomp_opt="--security-opt seccomp=$SECCOMP_FILE"
     fi
 
+    # Calculate PIDs limit based on max_clients (each connection may use threads)
+    local pids_limit=$((max_clients + 50))
+
     if docker run -d \
         --name "$CONTAINER_NAME" \
         --restart unless-stopped \
@@ -1165,7 +1212,7 @@ install_new() {
         --memory "$MAX_MEMORY" \
         --cpus "$MAX_CPUS" \
         --memory-swap "$MEMORY_SWAP" \
-        --pids-limit 100 \
+        --pids-limit "$pids_limit" \
         -v "$VOLUME_NAME":/home/conduit/data \
         "$IMAGE" \
         start --max-clients "$max_clients" --bandwidth "$bandwidth" -v > /dev/null 2>&1; then
@@ -1343,6 +1390,22 @@ view_dashboard() {
                 container_cpu_cores=$(awk "BEGIN {printf \"%.0f\", $container_cpu_limit/1000000000}")
             fi
 
+            # Get max-clients and bandwidth from container args
+            local container_args=""
+            local container_max_clients=""
+            local container_bandwidth=""
+            container_args=$(docker inspect --format='{{.Args}}' "$CONTAINER_NAME" 2>/dev/null) || container_args=""
+            container_max_clients=$(echo "$container_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || container_max_clients=""
+            container_bandwidth=$(echo "$container_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || container_bandwidth=""
+            container_max_clients="${container_max_clients:-N/A}"
+            if [ "$container_bandwidth" = "-1" ]; then
+                container_bandwidth="Unlimited"
+            elif [ -n "$container_bandwidth" ]; then
+                container_bandwidth="${container_bandwidth} Mbps"
+            else
+                container_bandwidth="N/A"
+            fi
+
             # Check if container limits match configured limits
             local config_mem_gb="${MAX_MEMORY%g}"
             local limits_match=true
@@ -1357,10 +1420,10 @@ view_dashboard() {
                 echo -e " NODE ID:     ${CYAN}${node_id}${NC}${CL}"
             fi
             echo "──────────────────────────────────────────────────────${CL}"
-            echo -e " ${BOLD}CLIENTS${NC}${CL}"
+            echo -e " ${BOLD}CLIENTS${NC}        (Max: ${container_max_clients})${CL}"
             echo -e "   Connected:  ${GREEN}${conn}${NC}      | Connecting: ${YELLOW}${connecting}${NC}${CL}"
             echo "──────────────────────────────────────────────────────${CL}"
-            echo -e " ${BOLD}TRAFFIC${NC}${CL}"
+            echo -e " ${BOLD}TRAFFIC${NC}        (Limit: ${container_bandwidth})${CL}"
             echo -e "   Upload:     ${CYAN}${up}${NC}    | Download: ${CYAN}${down}${NC}${CL}"
             echo "──────────────────────────────────────────────────────${CL}"
             printf " ${BOLD}%-12s${NC} %-20s %s${CL}\n" "RESOURCES" "Container" "System"
@@ -2151,8 +2214,18 @@ while true; do
         5) health_check ;;
         6)
             print_header
-            echo -e "${BLUE}▶ RECONFIGURATION${NC}"
-            install_new
+            echo -e "${YELLOW}═══ RECONFIGURE CONDUIT ═══${NC}"
+            echo ""
+            echo -e "${YELLOW}This will recreate the container with new settings.${NC}"
+            echo "Your node identity key will be preserved."
+            echo ""
+            read -p "Continue with reconfiguration? (y/N): " confirm_reconfig
+            if [[ "$confirm_reconfig" =~ ^[Yy]$ ]]; then
+                install_new
+            else
+                echo "Reconfiguration cancelled."
+                sleep 1
+            fi
             ;;
         7) configure_resources ;;
         8) show_security_info ;;

@@ -59,6 +59,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Properties
 
+    /// App version - displayed in menu
+    let appVersion = "1.5.7"
+
     /// The status bar item that appears in the macOS menu bar
     var statusItem: NSStatusItem?
 
@@ -167,6 +170,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Version display
+        let versionItem = NSMenuItem(title: "Version \(appVersion)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+
         // Quit button - keyboard shortcut: Cmd+Q
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
 
@@ -188,24 +196,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem?.button {
             // Choose icon based on status:
             // - Warning triangle: Docker issues
-            // - Filled globe: Conduit running
-            // - Empty globe: Conduit stopped
+            // - Green circle: Conduit running and connected
+            // - Gray circle: Conduit stopped
             let symbolName: String
+            var tintColor: NSColor? = nil
+
             switch dockerStatus {
             case .notInstalled, .notRunning:
                 symbolName = "exclamationmark.triangle"
             case .running:
-                symbolName = isRunning ? "globe.americas.fill" : "globe"
+                symbolName = "circle.fill"
+                tintColor = isRunning ? NSColor.systemGreen : NSColor.systemGray
             }
 
             if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Conduit") {
-                let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+                let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
                 if let configuredImage = image.withSymbolConfiguration(config) {
-                    // Template mode ensures proper appearance in light/dark mode
-                    configuredImage.isTemplate = true
-                    button.image = configuredImage
+                    // Use template mode only for warning icon, direct color for circle
+                    if dockerStatus == .running {
+                        configuredImage.isTemplate = false
+                        button.image = configuredImage
+                        button.contentTintColor = tintColor
+                    } else {
+                        configuredImage.isTemplate = true
+                        button.image = configuredImage
+                        button.contentTintColor = nil
+                    }
                 }
-                button.contentTintColor = nil
             }
         }
 
@@ -241,7 +258,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Client stats (tag 102)
             if let statsItem = menu.item(withTag: 102) {
                 if isRunning, let stats = manager.getStats() {
-                    statsItem.title = "Clients: \(stats.connected) connected"
+                    if stats.connecting > 0 {
+                        statsItem.title = "Clients: \(stats.connected) connected (\(stats.connecting) connecting)"
+                    } else {
+                        statsItem.title = "Clients: \(stats.connected) connected"
+                    }
                     statsItem.isHidden = false
                 } else {
                     statsItem.title = "Clients: -"
@@ -484,6 +505,9 @@ class ConduitManager {
         let lines = output.components(separatedBy: "\n")
         for line in lines.reversed() {
             if line.contains("[STATS]") {
+                var connected = 0
+                var connecting = 0
+
                 // Extract "Connected: X" value
                 if let connRange = line.range(of: "Connected: ") {
                     let start = connRange.upperBound
@@ -495,10 +519,24 @@ class ConduitManager {
                             break
                         }
                     }
-                    if let connected = Int(numStr) {
-                        return (connected, 0)
-                    }
+                    connected = Int(numStr) ?? 0
                 }
+
+                // Extract "Connecting: X" value
+                if let connRange = line.range(of: "Connecting: ") {
+                    let start = connRange.upperBound
+                    var numStr = ""
+                    for char in line[start...] {
+                        if char.isNumber {
+                            numStr.append(char)
+                        } else {
+                            break
+                        }
+                    }
+                    connecting = Int(numStr) ?? 0
+                }
+
+                return (connected, connecting)
             }
         }
         return nil
