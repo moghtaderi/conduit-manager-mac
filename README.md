@@ -1,4 +1,4 @@
-<h1 align="center">🌐 Psiphon Conduit Manager</h1>
+<h1 align="center">Psiphon Conduit Manager</h1>
 <p align="center"><strong>macOS Edition</strong></p>
 
 <p align="center">
@@ -18,19 +18,19 @@
 
 ---
 
-## ✨ Features
+## Features
 
 | Feature | Description |
 |---------|-------------|
-| 🖥️ **Menu Bar App** | Native macOS app - Start/Stop with one click |
-| 📊 **Live Stats** | See connected clients & traffic in real-time |
-| 🔒 **Security Hardened** | Read-only filesystem, isolated network, seccomp |
-| 🐳 **Docker Status** | Auto-detects if Docker is running |
-| 🌙 **Dark Mode** | Works perfectly in light and dark mode |
+| **Menu Bar App** | Native macOS app - Start/Stop with one click |
+| **Live Stats** | See connected clients & traffic in real-time |
+| **Security Hardened** | Read-only filesystem, isolated network, seccomp |
+| **Docker Status** | Auto-detects if Docker is running |
+| **Dark Mode** | Works perfectly in light and dark mode |
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Step 1: Install Docker Desktop
 
@@ -52,17 +52,17 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 | Step | Press | What it does |
 |:----:|:-----:|--------------|
-| 1️⃣ | `7` | Set your CPU & RAM limits |
-| 2️⃣ | `6` | Install the Conduit service |
-| 3️⃣ | `m` | Open the Menu Bar App |
+| 1 | `7` | Set your CPU & RAM limits |
+| 2 | `6` | Install the Conduit service |
+| 3 | `m` | Open the Menu Bar App |
 
-✅ **Done!** Your node is now helping people access the free internet.
+**Done!** Your node is now helping people access the free internet.
 
 ---
 
-## 🖥️ Menu Bar App
+## Menu Bar App
 
-The menu bar app gives you quick control without opening Terminal:
+Quick control without opening Terminal:
 
 ```
 ┌─────────────────────────────┐
@@ -75,13 +75,11 @@ The menu bar app gives you quick control without opening Terminal:
 │ ■ Stop                 ⌘X   │
 ├─────────────────────────────┤
 │ Open Terminal Manager...    │
-│ Path: ~/conduit-manager/... │
 ├─────────────────────────────┤
-│ Node ID: uOlL1j1zIXY...     │
 │ Max Clients: 250            │
 │ Bandwidth: 15 Mbps          │
 ├─────────────────────────────┤
-│ Version 1.5.9               │
+│ Version 1.6.0               │
 │ Quit                   ⌘Q   │
 └─────────────────────────────┘
 ```
@@ -100,7 +98,7 @@ System Settings → General → Login Items → Add `Conduit-Mac.app`
 
 ---
 
-## ⌨️ CLI Menu Options
+## CLI Menu Options
 
 ```
 ╔═══════════════════════════════════════╗
@@ -134,21 +132,21 @@ System Settings → General → Login Items → Add `Conduit-Mac.app`
 
 ---
 
-## 🔒 Security
+## Security
 
 Your Mac is fully protected:
 
 | Protection | What it means |
 |------------|---------------|
-| 📁 Read-only filesystem | Container can't write to your disk |
-| 🌐 Isolated network | No access to your local network |
-| ⬇️ Dropped capabilities | Minimal Linux privileges |
-| 📊 Resource limits | CPU & RAM are capped |
-| 🛡️ Seccomp filtering | Dangerous syscalls blocked |
+| Read-only filesystem | Container can't write to your disk |
+| Isolated network | No access to your local network |
+| Dropped capabilities | Minimal Linux privileges |
+| Resource limits | CPU & RAM are capped |
+| Seccomp filtering | Dangerous syscalls blocked |
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 ### Will updating lose my Node ID?
 
@@ -164,7 +162,7 @@ Press `b` in the CLI menu to create a backup. Backups are saved to `~/.conduit-b
 
 ---
 
-## 🗑️ Uninstall
+## Uninstall
 
 **Easy way:** Press `x` in the CLI menu
 
@@ -180,7 +178,7 @@ rm -rf ~/conduit-manager ~/.conduit-*
 
 <div dir="rtl">
 
-## 🚀 نصب سریع
+## نصب سریع
 
 ### مرحله ۱: نصب Docker Desktop
 
@@ -214,11 +212,11 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 | ۲ | `6` | نصب سرویس Conduit |
 | ۳ | `m` | باز کردن برنامه Menu Bar |
 
-✅ **تمام!** نود شما اکنون فعال است و به دیگران کمک می‌کند.
+**تمام!** نود شما اکنون فعال است و به دیگران کمک می‌کند.
 
 ---
 
-## 🖥️ برنامه Menu Bar
+## برنامه Menu Bar
 
 کنترل سریع بدون نیاز به Terminal:
 
@@ -226,16 +224,15 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 ```
 ┌─────────────────────────────┐
-│ ● Conduit: Running          │  ← وضعیت
-│ Clients: 5 connected        │  ← تعداد کاربران
-│ Traffic: ↑ 1.2 GB  ↓ 3.4 GB │  ← ترافیک
+│ ● Conduit: Running          │
+│ Clients: 5 connected        │
+│ Traffic: ↑ 1.2 GB  ↓ 3.4 GB │
 ├─────────────────────────────┤
-│ ↻ Restart                   │  ← ریستارت
-│ ■ Stop                      │  ← توقف
+│ ↻ Restart                   │
+│ ■ Stop                      │
 ├─────────────────────────────┤
-│ Node ID: uOlL1j1zIXY...     │  ← شناسه نود
-│ Max Clients: 250            │  ← حداکثر کاربران
-│ Bandwidth: 15 Mbps          │  ← پهنای باند
+│ Max Clients: 250            │
+│ Bandwidth: 15 Mbps          │
 └─────────────────────────────┘
 ```
 
@@ -251,20 +248,20 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 ---
 
-## 🔒 امنیت
+## امنیت
 
 مک شما کاملاً محافظت شده است:
 
 | محافظت | توضیح |
 |--------|-------|
-| 📁 فایل‌سیستم فقط‌خواندنی | کانتینر نمی‌تواند روی دیسک بنویسد |
-| 🌐 شبکه ایزوله | دسترسی به شبکه محلی ندارد |
-| ⬇️ امتیازات محدود | حداقل دسترسی‌های لینوکس |
-| 📊 محدودیت منابع | CPU و RAM محدود شده |
+| فایل‌سیستم فقط‌خواندنی | کانتینر نمی‌تواند روی دیسک بنویسد |
+| شبکه ایزوله | دسترسی به شبکه محلی ندارد |
+| امتیازات محدود | حداقل دسترسی‌های لینوکس |
+| محدودیت منابع | CPU و RAM محدود شده |
 
 ---
 
-## 🗑️ حذف برنامه
+## حذف برنامه
 
 **روش آسان:** در منوی CLI کلید `x` را بزنید
 
@@ -281,11 +278,11 @@ rm -rf ~/conduit-manager ~/.conduit-*
 
 ---
 
-## 🙏 Credits
+## Credits
 
 - [Psiphon](https://psiphon.ca/) - Psiphon Conduit project
 - [SamNet-dev/conduit-manager](https://github.com/SamNet-dev/conduit-manager) - Original Linux script
 
-## 📄 License
+## License
 
 MIT

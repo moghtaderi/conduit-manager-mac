@@ -1,778 +1,442 @@
-// ╔═══════════════════════════════════════════════════════════════════════════╗
-// ║                    PSIPHON CONDUIT MENU BAR APP                           ║
-// ║                         For macOS                                         ║
-// ╠═══════════════════════════════════════════════════════════════════════════╣
-// ║  A lightweight menu bar app to control the Psiphon Conduit Docker         ║
-// ║  container. Provides quick access to start/stop the service, view         ║
-// ║  connection stats, and monitor traffic.                                   ║
-// ║                                                                           ║
-// ║  Features:                                                                ║
-// ║    - Real-time status monitoring (updates every 5 seconds)                ║
-// ║    - Docker Desktop detection with helpful messages                       ║
-// ║    - Start/Stop/Restart container controls                                ║
-// ║    - Live client connection count                                         ║
-// ║    - Upload/Download traffic statistics                                   ║
-// ║    - Quick access to terminal manager                                     ║
-// ║    - Modern UserNotifications for alerts                                  ║
-// ║                                                                           ║
-// ║  Requirements:                                                            ║
-// ║    - macOS 11.0+ (Big Sur or later)                                       ║
-// ║    - Docker Desktop installed and running                                 ║
-// ║    - Conduit container created via conduit-mac.sh                         ║
-// ╚═══════════════════════════════════════════════════════════════════════════╝
+/// Psiphon Conduit Menu Bar App for macOS
+/// A lightweight menu bar app to control the Psiphon Conduit Docker container.
 
 import SwiftUI
 import AppKit
 import UserNotifications
 
-// MARK: - Main App Entry Point
+// MARK: - App Entry Point
 
-/// The main SwiftUI app structure.
-/// Uses NSApplicationDelegateAdaptor to bridge to AppKit for menu bar functionality.
 @main
 struct ConduitMenuBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-
-    var body: some Scene {
-        // Empty scene - this is a menu bar-only app with no main window
-        Settings {
-            EmptyView()
-        }
-    }
+    var body: some Scene { Settings { EmptyView() } }
 }
 
-// MARK: - Docker Status Enum
+// MARK: - Types
 
-/// Represents the three possible states of Docker on the system.
-/// Used to determine what UI elements to show and what actions are available.
 enum DockerStatus {
-    case notInstalled  // Docker CLI binary not found
-    case notRunning    // Docker installed but daemon not responding
-    case running       // Docker fully operational
+    case notInstalled, notRunning, running
 }
 
 // MARK: - App Delegate
 
-/// Main controller for the menu bar app.
-/// Handles menu setup, status updates, and user interactions.
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    // MARK: Properties
+    private let version = "1.6.0"
+    private var statusItem: NSStatusItem?
+    private var manager: ConduitManager?
+    private var timer: Timer?
 
-    /// App version - displayed in menu
-    let appVersion = "1.6.0"
+    // MARK: Lifecycle
 
-    /// The status bar item that appears in the macOS menu bar
-    var statusItem: NSStatusItem?
-
-    /// Manager class that handles Docker and container operations
-    var conduitManager: ConduitManager?
-
-    /// Timer for periodic status updates (every 5 seconds)
-    var updateTimer: Timer?
-
-    // MARK: App Lifecycle
-
-    /// Called when the app finishes launching.
-    /// Sets up the menu bar item, initializes the manager, and starts the update timer.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Hide dock icon - this is a menu bar-only app
         NSApp.setActivationPolicy(.accessory)
-
-        // Request notification permissions for alerts
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
-        // Create the status bar item with variable width to accommodate different icon sizes
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
-        // Initialize the Docker/container manager
-        conduitManager = ConduitManager()
-
-        // Build the dropdown menu
+        manager = ConduitManager()
         setupMenu()
 
-        // Start polling for status updates every 5 seconds
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.updateStatus()
         }
-
-        // Perform initial status check immediately
         updateStatus()
     }
 
     // MARK: Menu Setup
 
-    /// Helper to create a non-interactive menu item with a custom view (prevents grayed-out appearance)
-    func createInfoMenuItem(title: String, tag: Int) -> NSMenuItem {
-        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private func setupMenu() {
+        let menu = NSMenu()
+
+        // Status section
+        menu.addItem(infoItem("○ Conduit: Checking...", tag: 100))
+        menu.addItem(infoItem("", tag: 101, hidden: true))  // Docker helper message
+        menu.addItem(infoItem("Clients: -", tag: 102))
+        menu.addItem(infoItem("Traffic: -", tag: 103))
+        menu.addItem(infoItem("Uptime: -", tag: 104))
+        menu.addItem(.separator())
+
+        // Controls
+        menu.addItem(actionItem("▶ Start", action: #selector(startConduit), key: "s", tag: 200))
+        menu.addItem(actionItem("■ Stop", action: #selector(stopConduit), key: "x", tag: 201))
+        menu.addItem(.separator())
+
+        // Utilities
+        menu.addItem(actionItem("Download Docker Desktop...", action: #selector(openDockerDownload), tag: 300, hidden: true))
+        menu.addItem(actionItem("Open Terminal Manager...", action: #selector(openTerminal), key: "t"))
+
+        let scriptPath = findScript() ?? "~/conduit-manager/conduit-mac.sh"
+        menu.addItem(actionItem("Path: \(scriptPath)", action: #selector(copyPath), tag: 301))
+        menu.addItem(.separator())
+
+        // Config info
+        menu.addItem(infoItem("Max Clients: -", tag: 401))
+        menu.addItem(infoItem("Bandwidth: -", tag: 402))
+        menu.addItem(.separator())
+
+        // Footer
+        let versionItem = NSMenuItem(title: "Version \(version)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+        menu.addItem(actionItem("Quit", action: #selector(quitApp), key: "q"))
+
+        statusItem?.menu = menu
+    }
+
+    /// Creates a non-interactive info item with custom view (avoids grayed-out appearance)
+    private func infoItem(_ title: String, tag: Int, hidden: Bool = false) -> NSMenuItem {
+        let item = NSMenuItem()
         item.tag = tag
+        item.isHidden = hidden
 
-        // Use a custom view to prevent the grayed-out disabled appearance
         let label = NSTextField(labelWithString: title)
-        label.font = NSFont.menuFont(ofSize: 13)
-        label.textColor = NSColor.labelColor
-
-        // Create a container view with proper menu item padding
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 18))
+        label.font = .menuFont(ofSize: 13)
+        label.textColor = .labelColor
         label.frame = NSRect(x: 14, y: 0, width: 280, height: 18)
-        container.addSubview(label)
 
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 18))
+        container.addSubview(label)
         item.view = container
+
         return item
     }
 
-    /// Helper to update an info menu item's custom view
-    func updateInfoMenuItem(_ item: NSMenuItem, title: String, color: NSColor = .labelColor) {
-        if let container = item.view, let label = container.subviews.first as? NSTextField {
-            label.stringValue = title
-            label.textColor = color
-        }
+    /// Creates a clickable action item
+    private func actionItem(_ title: String, action: Selector, key: String = "", tag: Int = 0, hidden: Bool = false) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.tag = tag
+        item.isHidden = hidden
+        return item
     }
 
-    /// Builds the dropdown menu with all items.
-    /// Menu items are tagged with IDs for later updates.
-    func setupMenu() {
-        let menu = NSMenu()
-
-        // --- Status Section ---
-
-        // Main status line (tag 100)
-        let statusItem = createInfoMenuItem(title: "○ Conduit: Checking...", tag: 100)
-        menu.addItem(statusItem)
-
-        // Docker status message - hidden unless Docker has issues (tag 101)
-        let dockerItem = createInfoMenuItem(title: "", tag: 101)
-        dockerItem.isHidden = true
-        menu.addItem(dockerItem)
-
-        // Client connection count (tag 102)
-        let statsItem = createInfoMenuItem(title: "Clients: -", tag: 102)
-        menu.addItem(statsItem)
-
-        // Traffic statistics (tag 103)
-        let trafficItem = createInfoMenuItem(title: "Traffic: -", tag: 103)
-        menu.addItem(trafficItem)
-
-        // Uptime (tag 104)
-        let uptimeItem = createInfoMenuItem(title: "Uptime: -", tag: 104)
-        menu.addItem(uptimeItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // --- Control Section ---
-
-        // Start/Restart button (tag 200) - keyboard shortcut: Cmd+S
-        let startItem = NSMenuItem(title: "▶ Start", action: #selector(startConduit), keyEquivalent: "s")
-        startItem.tag = 200
-        menu.addItem(startItem)
-
-        // Stop button (tag 201) - keyboard shortcut: Cmd+X
-        let stopItem = NSMenuItem(title: "■ Stop", action: #selector(stopConduit), keyEquivalent: "x")
-        stopItem.tag = 201
-        menu.addItem(stopItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // --- Utilities Section ---
-
-        // Docker Desktop download link - hidden unless Docker not installed (tag 300)
-        let downloadDockerItem = NSMenuItem(title: "Download Docker Desktop...", action: #selector(openDockerDownload), keyEquivalent: "")
-        downloadDockerItem.tag = 300
-        downloadDockerItem.isHidden = true
-        menu.addItem(downloadDockerItem)
-
-        // Open terminal manager - keyboard shortcut: Cmd+T
-        menu.addItem(NSMenuItem(title: "Open Terminal Manager...", action: #selector(openTerminal), keyEquivalent: "t"))
-
-        // Script path display - click to copy (tag 301)
-        let scriptPath = findConduitScript() ?? "~/conduit-manager/conduit-mac.sh"
-        let pathItem = NSMenuItem(title: "Path: \(scriptPath)", action: #selector(copyScriptPath), keyEquivalent: "")
-        pathItem.tag = 301
-        menu.addItem(pathItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Max clients (tag 401)
-        let maxClientsItem = createInfoMenuItem(title: "Max Clients: -", tag: 401)
-        menu.addItem(maxClientsItem)
-
-        // Bandwidth limit (tag 402)
-        let bandwidthItem = createInfoMenuItem(title: "Bandwidth: -", tag: 402)
-        menu.addItem(bandwidthItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Version display
-        let versionItem = NSMenuItem(title: "Version \(appVersion)", action: nil, keyEquivalent: "")
-        versionItem.isEnabled = false
-        menu.addItem(versionItem)
-
-        // Quit button - keyboard shortcut: Cmd+Q
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
-
-        self.statusItem?.menu = menu
+    /// Updates an info item's label text and color
+    private func updateInfo(_ item: NSMenuItem, _ title: String, _ color: NSColor = .labelColor) {
+        guard let label = item.view?.subviews.first as? NSTextField else { return }
+        label.stringValue = title
+        label.textColor = color
     }
 
     // MARK: Status Updates
 
-    /// Updates all menu items based on current Docker and container status.
-    /// Called every 5 seconds by the timer and immediately after user actions.
-    func updateStatus() {
-        guard let manager = conduitManager else { return }
+    private func updateStatus() {
+        guard let manager = manager, let menu = statusItem?.menu else { return }
 
-        // Get current states
-        let dockerStatus = manager.getDockerStatus()
-        let isRunning = dockerStatus == .running && manager.isContainerRunning()
+        let docker = manager.dockerStatus
+        let running = docker == .running && manager.isRunning
 
-        // --- Update Menu Bar Icon ---
-        if let button = statusItem?.button {
-            // Icon selection:
-            // - exclamationmark.triangle: Docker issues (template, adapts to light/dark)
-            // - antenna.radiowaves.left.and.right: Running (with green accent)
-            // - antenna.radiowaves.left.and.right.slash: Stopped (template, adapts to light/dark)
-            let symbolName: String
-            var useMulticolor = false
+        // Update icon
+        updateIcon(docker: docker, running: running)
 
-            switch dockerStatus {
-            case .notInstalled, .notRunning:
-                symbolName = "exclamationmark.triangle"
-            case .running:
-                if isRunning {
-                    symbolName = "antenna.radiowaves.left.and.right"
-                    useMulticolor = true
-                } else {
-                    symbolName = "antenna.radiowaves.left.and.right.slash"
-                }
-            }
-
-            if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Conduit") {
-                var config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
-
-                if useMulticolor {
-                    // Use hierarchical rendering with green for the "active" state
-                    let colorConfig = NSImage.SymbolConfiguration(paletteColors: [.systemGreen])
-                    config = config.applying(colorConfig)
-                }
-
-                if let configuredImage = image.withSymbolConfiguration(config) {
-                    // Template mode for proper light/dark adaptation (except multicolor)
-                    configuredImage.isTemplate = !useMulticolor
-                    button.image = configuredImage
-                }
+        // Status line (100)
+        if let item = menu.item(withTag: 100) {
+            switch docker {
+            case .notInstalled: updateInfo(item, "⚠ Docker Not Installed", .systemOrange)
+            case .notRunning:   updateInfo(item, "⚠ Docker Not Running", .systemOrange)
+            case .running:      updateInfo(item, running ? "● Conduit: Running" : "○ Conduit: Stopped",
+                                           running ? .systemGreen : .secondaryLabelColor)
             }
         }
 
-        // --- Update Menu Items ---
-        if let menu = statusItem?.menu {
-
-            // Status text (tag 100)
-            if let statusMenuItem = menu.item(withTag: 100) {
-                switch dockerStatus {
-                case .notInstalled:
-                    updateInfoMenuItem(statusMenuItem, title: "⚠ Docker Not Installed", color: .systemOrange)
-                case .notRunning:
-                    updateInfoMenuItem(statusMenuItem, title: "⚠ Docker Not Running", color: .systemOrange)
-                case .running:
-                    if isRunning {
-                        updateInfoMenuItem(statusMenuItem, title: "● Conduit: Running", color: .systemGreen)
-                    } else {
-                        updateInfoMenuItem(statusMenuItem, title: "○ Conduit: Stopped", color: .secondaryLabelColor)
-                    }
-                }
+        // Docker helper (101)
+        if let item = menu.item(withTag: 101) {
+            switch docker {
+            case .notInstalled:
+                updateInfo(item, "   Install Docker Desktop to use Conduit", .secondaryLabelColor)
+                item.isHidden = false
+            case .notRunning:
+                updateInfo(item, "   Please start Docker Desktop", .secondaryLabelColor)
+                item.isHidden = false
+            case .running:
+                item.isHidden = true
             }
+        }
 
-            // Docker status helper message (tag 101)
-            if let dockerItem = menu.item(withTag: 101) {
-                switch dockerStatus {
-                case .notInstalled:
-                    updateInfoMenuItem(dockerItem, title: "   Install Docker Desktop to use Conduit", color: .secondaryLabelColor)
-                    dockerItem.isHidden = false
-                case .notRunning:
-                    updateInfoMenuItem(dockerItem, title: "   Please start Docker Desktop", color: .secondaryLabelColor)
-                    dockerItem.isHidden = false
-                case .running:
-                    dockerItem.isHidden = true
-                }
-            }
+        // Stats (102-104)
+        updateStatsItems(menu: menu, running: running, docker: docker)
 
-            // Client stats (tag 102)
-            if let statsItem = menu.item(withTag: 102) {
-                if isRunning, let stats = manager.getStats() {
-                    if stats.connecting > 0 {
-                        updateInfoMenuItem(statsItem, title: "Clients: \(stats.connected) connected (\(stats.connecting) connecting)")
-                    } else {
-                        updateInfoMenuItem(statsItem, title: "Clients: \(stats.connected) connected")
-                    }
-                    statsItem.isHidden = false
-                } else {
-                    updateInfoMenuItem(statsItem, title: "Clients: -")
-                    statsItem.isHidden = dockerStatus != .running
-                }
-            }
+        // Controls (200-201)
+        menu.item(withTag: 200)?.title = running ? "↻ Restart" : "▶ Start"
+        menu.item(withTag: 200)?.isEnabled = docker == .running
+        menu.item(withTag: 201)?.isEnabled = running
 
-            // Traffic stats (tag 103)
-            if let trafficItem = menu.item(withTag: 103) {
-                if isRunning, let traffic = manager.getTraffic() {
-                    updateInfoMenuItem(trafficItem, title: "Traffic: ↑ \(traffic.upload)  ↓ \(traffic.download)")
-                    trafficItem.isHidden = false
-                } else {
-                    updateInfoMenuItem(trafficItem, title: "Traffic: -")
-                    trafficItem.isHidden = dockerStatus != .running
-                }
-            }
+        // Docker download (300)
+        menu.item(withTag: 300)?.isHidden = docker != .notInstalled
 
-            // Uptime (tag 104)
-            if let uptimeItem = menu.item(withTag: 104) {
-                if isRunning, let uptime = manager.getUptime() {
-                    updateInfoMenuItem(uptimeItem, title: "Uptime: \(uptime)")
-                    uptimeItem.isHidden = false
-                } else {
-                    updateInfoMenuItem(uptimeItem, title: "Uptime: -")
-                    uptimeItem.isHidden = dockerStatus != .running
-                }
-            }
+        // Config (401-402)
+        updateConfigItems(menu: menu, docker: docker)
+    }
 
-            // Start/Restart button (tag 200)
-            if let startItem = menu.item(withTag: 200) {
-                startItem.title = isRunning ? "↻ Restart" : "▶ Start"
-                startItem.isEnabled = dockerStatus == .running
-            }
+    private func updateIcon(docker: DockerStatus, running: Bool) {
+        guard let button = statusItem?.button else { return }
 
-            // Stop button (tag 201)
-            if let stopItem = menu.item(withTag: 201) {
-                stopItem.isEnabled = isRunning
+        let (symbolName, colored): (String, Bool) = {
+            switch docker {
+            case .notInstalled, .notRunning: return ("exclamationmark.triangle", false)
+            case .running: return running
+                ? ("antenna.radiowaves.left.and.right", true)
+                : ("antenna.radiowaves.left.and.right.slash", false)
             }
+        }()
 
-            // Docker download link (tag 300)
-            if let downloadItem = menu.item(withTag: 300) {
-                downloadItem.isHidden = dockerStatus != .notInstalled
-            }
+        guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Conduit") else { return }
+        var config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+        if colored { config = config.applying(.init(paletteColors: [.systemGreen])) }
 
-            // Max clients (tag 401)
-            if let maxClientsItem = menu.item(withTag: 401) {
-                if dockerStatus == .running, let config = manager.getContainerConfig() {
-                    updateInfoMenuItem(maxClientsItem, title: "Max Clients: \(config.maxClients)")
-                    maxClientsItem.isHidden = false
-                } else {
-                    updateInfoMenuItem(maxClientsItem, title: "Max Clients: -")
-                    maxClientsItem.isHidden = dockerStatus != .running
-                }
-            }
-
-            // Bandwidth (tag 402)
-            if let bandwidthItem = menu.item(withTag: 402) {
-                if dockerStatus == .running, let config = manager.getContainerConfig() {
-                    updateInfoMenuItem(bandwidthItem, title: "Bandwidth: \(config.bandwidth)")
-                    bandwidthItem.isHidden = false
-                } else {
-                    updateInfoMenuItem(bandwidthItem, title: "Bandwidth: -")
-                    bandwidthItem.isHidden = dockerStatus != .running
-                }
-            }
+        if let configured = image.withSymbolConfiguration(config) {
+            configured.isTemplate = !colored
+            button.image = configured
         }
     }
 
-    // MARK: User Actions
+    private func updateStatsItems(menu: NSMenu, running: Bool, docker: DockerStatus) {
+        // Clients (102)
+        if let item = menu.item(withTag: 102) {
+            if running, let stats = manager?.stats {
+                let text = stats.connecting > 0
+                    ? "Clients: \(stats.connected) connected (\(stats.connecting) connecting)"
+                    : "Clients: \(stats.connected) connected"
+                updateInfo(item, text)
+            } else {
+                updateInfo(item, "Clients: -")
+            }
+            item.isHidden = docker != .running
+        }
 
-    /// Starts or restarts the Conduit container.
-    /// Shows a notification and updates status after a short delay.
-    @objc func startConduit() {
-        guard let manager = conduitManager else { return }
+        // Traffic (103)
+        if let item = menu.item(withTag: 103) {
+            if running, let traffic = manager?.traffic {
+                updateInfo(item, "Traffic: ↑ \(traffic.up)  ↓ \(traffic.down)")
+            } else {
+                updateInfo(item, "Traffic: -")
+            }
+            item.isHidden = docker != .running
+        }
 
-        // Prevent action if Docker isn't running
-        if manager.getDockerStatus() != .running {
-            showNotification(title: "Conduit", body: "Please start Docker Desktop first")
+        // Uptime (104)
+        if let item = menu.item(withTag: 104) {
+            if running, let uptime = manager?.uptime {
+                updateInfo(item, "Uptime: \(uptime)")
+            } else {
+                updateInfo(item, "Uptime: -")
+            }
+            item.isHidden = docker != .running
+        }
+    }
+
+    private func updateConfigItems(menu: NSMenu, docker: DockerStatus) {
+        let config = docker == .running ? manager?.config : nil
+
+        if let item = menu.item(withTag: 401) {
+            updateInfo(item, "Max Clients: \(config?.maxClients ?? "-")")
+            item.isHidden = docker != .running
+        }
+        if let item = menu.item(withTag: 402) {
+            updateInfo(item, "Bandwidth: \(config?.bandwidth ?? "-")")
+            item.isHidden = docker != .running
+        }
+    }
+
+    // MARK: Actions
+
+    @objc private func startConduit() {
+        guard let manager = manager else { return }
+        guard manager.dockerStatus == .running else {
+            notify("Conduit", "Please start Docker Desktop first")
             return
         }
-
-        manager.startContainer()
-
-        // Update status after container has time to start
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.updateStatus()
-        }
-        showNotification(title: "Conduit", body: "Starting Conduit service...")
+        manager.start()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.updateStatus() }
+        notify("Conduit", "Starting Conduit service...")
     }
 
-    /// Stops the Conduit container.
-    @objc func stopConduit() {
-        conduitManager?.stopContainer()
-
-        // Update status after container stops
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            self?.updateStatus()
-        }
-        showNotification(title: "Conduit", body: "Conduit service stopped")
+    @objc private func stopConduit() {
+        manager?.stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.updateStatus() }
+        notify("Conduit", "Conduit service stopped")
     }
 
-    /// Opens the Docker Desktop download page in the default browser.
-    @objc func openDockerDownload() {
-        if let url = URL(string: "https://www.docker.com/products/docker-desktop/") {
-            NSWorkspace.shared.open(url)
-        }
+    @objc private func openDockerDownload() {
+        NSWorkspace.shared.open(URL(string: "https://www.docker.com/products/docker-desktop/")!)
     }
 
-    /// Copies the script path to the clipboard.
-    @objc func copyScriptPath() {
-        let scriptPath = findConduitScript() ?? "~/conduit-manager/conduit-mac.sh"
+    @objc private func copyPath() {
+        let path = findScript() ?? "~/conduit-manager/conduit-mac.sh"
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(scriptPath, forType: .string)
-        showNotification(title: "Copied", body: "Script path copied to clipboard")
+        NSPasteboard.general.setString(path, forType: .string)
+        notify("Copied", "Script path copied to clipboard")
     }
 
-    /// Copies the Node ID to the clipboard.
-    /// Opens Terminal and runs the conduit-mac.sh script.
-    /// Uses AppleScript to control Terminal.app.
-    @objc func openTerminal() {
-        let scriptPath = findConduitScript()
-        if let path = scriptPath {
-            let script = """
+    @objc private func openTerminal() {
+        guard let path = findScript() else {
+            notify("Error", "Conduit script not found")
+            return
+        }
+        let script = """
             tell application "Terminal"
                 activate
                 do script "\(path)"
             end tell
             """
-            if let appleScript = NSAppleScript(source: script) {
-                var error: NSDictionary?
-                appleScript.executeAndReturnError(&error)
-            }
-        } else {
-            showNotification(title: "Error", body: "Conduit script not found")
-        }
+        NSAppleScript(source: script)?.executeAndReturnError(nil)
     }
 
-    // MARK: Helper Methods
+    @objc private func quitApp() { NSApp.terminate(nil) }
 
-    /// Searches common locations for the conduit-mac.sh script.
-    /// Returns the first path found, or nil if not installed.
-    func findConduitScript() -> String? {
-        let possiblePaths = [
-            "\(NSHomeDirectory())/conduit-manager/conduit-mac.sh",  // Default install location
-            "/usr/local/bin/conduit",                               // Symlink location
-            "\(NSHomeDirectory())/conduit-mac.sh"                   // Legacy location
-        ]
+    // MARK: Helpers
 
-        for path in possiblePaths {
-            if FileManager.default.fileExists(atPath: path) {
-                return path
-            }
-        }
-        return nil
+    private func findScript() -> String? {
+        ["\(NSHomeDirectory())/conduit-manager/conduit-mac.sh",
+         "/usr/local/bin/conduit",
+         "\(NSHomeDirectory())/conduit-mac.sh"]
+            .first { FileManager.default.fileExists(atPath: $0) }
     }
 
-    /// Shows a macOS notification using the modern UserNotifications framework.
-    /// This ensures the app icon appears correctly in notifications.
-    func showNotification(title: String, body: String) {
+    private func notify(_ title: String, _ body: String) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil  // nil trigger = deliver immediately
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         )
-
-        UNUserNotificationCenter.current().add(request)
-    }
-
-    /// Terminates the application.
-    @objc func quitApp() {
-        NSApp.terminate(nil)
     }
 }
 
 // MARK: - Conduit Manager
 
-/// Handles all Docker and container operations.
-/// Encapsulates the logic for checking status, starting/stopping containers,
-/// and parsing container logs for statistics.
 class ConduitManager {
 
-    /// The Docker container name used by conduit-mac.sh
-    let containerName = "conduit-mac"
+    private let container = "conduit-mac"
 
-    // MARK: Docker Status
+    // MARK: Status
 
-    /// Determines the current Docker status by checking installation and daemon state.
-    func getDockerStatus() -> DockerStatus {
-        // First check if Docker CLI binary exists
-        if !isDockerInstalled() {
-            return .notInstalled
-        }
-
-        // Then check if Docker daemon is responding
-        if !isDockerRunning() {
-            return .notRunning
-        }
-
+    var dockerStatus: DockerStatus {
+        guard isDockerInstalled else { return .notInstalled }
+        guard isDockerRunning else { return .notRunning }
         return .running
     }
 
-    /// Checks if Docker CLI is installed by looking for the binary in common locations.
-    func isDockerInstalled() -> Bool {
-        let dockerPaths = [
-            "/usr/local/bin/docker",                              // Intel Mac default
-            "/opt/homebrew/bin/docker",                           // Apple Silicon Homebrew
-            "/Applications/Docker.app/Contents/Resources/bin/docker"  // Docker.app bundled
-        ]
-        return dockerPaths.contains { FileManager.default.fileExists(atPath: $0) }
+    var isRunning: Bool {
+        run("docker", "ps", "--format", "{{.Names}}").contains(container)
     }
 
-    /// Checks if Docker daemon is running by executing `docker info`.
-    func isDockerRunning() -> Bool {
-        let output = runCommand("docker", arguments: ["info"])
-        // Docker info returns error text when daemon isn't running
-        return !output.isEmpty &&
-               !output.lowercased().contains("error") &&
-               !output.lowercased().contains("cannot connect")
+    private var isDockerInstalled: Bool {
+        dockerPaths.contains { FileManager.default.fileExists(atPath: $0) }
     }
 
-    // MARK: Container Operations
-
-    /// Checks if the Conduit container is currently running.
-    func isContainerRunning() -> Bool {
-        let output = runCommand("docker", arguments: ["ps", "--format", "{{.Names}}"])
-        return output.contains(containerName)
+    private var isDockerRunning: Bool {
+        let out = run("docker", "info").lowercased()
+        return !out.isEmpty && !out.contains("error") && !out.contains("cannot connect")
     }
 
-    /// Starts the Conduit container if it exists, or restarts it if already running.
-    /// Note: If the container doesn't exist, the user must use the terminal script to create it.
-    func startContainer() {
-        if !isContainerRunning() {
-            // Check if container exists but is stopped
-            let allContainers = runCommand("docker", arguments: ["ps", "-a", "--format", "{{.Names}}"])
-            if allContainers.contains(containerName) {
-                _ = runCommand("docker", arguments: ["start", containerName])
-            }
-            // If container doesn't exist, user needs to use the terminal script to create it
-        } else {
-            // Container is running - restart it
-            _ = runCommand("docker", arguments: ["restart", containerName])
+    // MARK: Container Control
+
+    func start() {
+        let all = run("docker", "ps", "-a", "--format", "{{.Names}}")
+        if all.contains(container) {
+            _ = isRunning ? run("docker", "restart", container) : run("docker", "start", container)
         }
     }
 
-    /// Stops the Conduit container.
-    func stopContainer() {
-        _ = runCommand("docker", arguments: ["stop", containerName])
+    func stop() { _ = run("docker", "stop", container) }
+
+    // MARK: Stats
+
+    var stats: (connected: Int, connecting: Int)? {
+        guard let line = recentStatsLine else { return nil }
+        return (extractInt(from: line, after: "Connected: "),
+                extractInt(from: line, after: "Connecting: "))
     }
 
-    // MARK: Stats Parsing
-
-    /// Parses container logs to extract client connection statistics.
-    /// Looks for [STATS] lines in the format: "Connected: X | Connecting: Y"
-    func getStats() -> (connected: Int, connecting: Int)? {
-        let output = runCommand("docker", arguments: ["logs", "--tail", "50", containerName])
-
-        // Search from most recent log entries
-        let lines = output.components(separatedBy: "\n")
-        for line in lines.reversed() {
-            if line.contains("[STATS]") {
-                var connected = 0
-                var connecting = 0
-
-                // Extract "Connected: X" value
-                if let connRange = line.range(of: "Connected: ") {
-                    let start = connRange.upperBound
-                    var numStr = ""
-                    for char in line[start...] {
-                        if char.isNumber {
-                            numStr.append(char)
-                        } else {
-                            break
-                        }
-                    }
-                    connected = Int(numStr) ?? 0
-                }
-
-                // Extract "Connecting: X" value
-                if let connRange = line.range(of: "Connecting: ") {
-                    let start = connRange.upperBound
-                    var numStr = ""
-                    for char in line[start...] {
-                        if char.isNumber {
-                            numStr.append(char)
-                        } else {
-                            break
-                        }
-                    }
-                    connecting = Int(numStr) ?? 0
-                }
-
-                return (connected, connecting)
-            }
-        }
-        return nil
+    var traffic: (up: String, down: String)? {
+        guard let line = recentStatsLine else { return nil }
+        let up = extractValue(from: line, after: "Up: ")
+        let down = extractValue(from: line, after: "Down: ")
+        guard up != "-" || down != "-" else { return nil }
+        return (up, down)
     }
 
-    /// Gets container uptime from Docker.
-    /// Returns a human-readable string like "2h 15m" or "3d 4h".
-    func getUptime() -> String? {
-        let output = runCommand("docker", arguments: ["ps", "--format", "{{.Status}}", "--filter", "name=\(containerName)"])
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    var uptime: String? {
+        let status = run("docker", "ps", "--format", "{{.Status}}", "--filter", "name=\(container)")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard status.lowercased().hasPrefix("up ") else { return nil }
 
-        // Docker status format: "Up 2 hours" or "Up 3 days" or "Up About an hour"
-        guard trimmed.lowercased().hasPrefix("up ") else { return nil }
-
-        // Remove "Up " prefix and clean up
-        var uptime = String(trimmed.dropFirst(3))
-
-        // Handle "About an hour" -> "~1h"
-        if uptime.lowercased().contains("about") {
-            uptime = uptime.replacingOccurrences(of: "About ", with: "~", options: .caseInsensitive)
-            uptime = uptime.replacingOccurrences(of: "an hour", with: "1h", options: .caseInsensitive)
-            uptime = uptime.replacingOccurrences(of: "a minute", with: "1m", options: .caseInsensitive)
-        }
-
-        // Shorten common units for cleaner display
-        uptime = uptime.replacingOccurrences(of: " seconds", with: "s")
-        uptime = uptime.replacingOccurrences(of: " second", with: "s")
-        uptime = uptime.replacingOccurrences(of: " minutes", with: "m")
-        uptime = uptime.replacingOccurrences(of: " minute", with: "m")
-        uptime = uptime.replacingOccurrences(of: " hours", with: "h")
-        uptime = uptime.replacingOccurrences(of: " hour", with: "h")
-        uptime = uptime.replacingOccurrences(of: " days", with: "d")
-        uptime = uptime.replacingOccurrences(of: " day", with: "d")
-        uptime = uptime.replacingOccurrences(of: " weeks", with: "w")
-        uptime = uptime.replacingOccurrences(of: " week", with: "w")
-
-        return uptime.isEmpty ? nil : uptime
+        return String(status.dropFirst(3))
+            .replacingOccurrences(of: "About ", with: "~")
+            .replacingOccurrences(of: "an hour", with: "1h")
+            .replacingOccurrences(of: "a minute", with: "1m")
+            .replacingOccurrences(of: " seconds", with: "s")
+            .replacingOccurrences(of: " second", with: "s")
+            .replacingOccurrences(of: " minutes", with: "m")
+            .replacingOccurrences(of: " minute", with: "m")
+            .replacingOccurrences(of: " hours", with: "h")
+            .replacingOccurrences(of: " hour", with: "h")
+            .replacingOccurrences(of: " days", with: "d")
+            .replacingOccurrences(of: " day", with: "d")
+            .replacingOccurrences(of: " weeks", with: "w")
+            .replacingOccurrences(of: " week", with: "w")
     }
 
-    /// Parses container logs to extract traffic statistics.
-    /// Looks for [STATS] lines in the format: "Up: 1.2 GB | Down: 3.4 GB"
-    func getTraffic() -> (upload: String, download: String)? {
-        let output = runCommand("docker", arguments: ["logs", "--tail", "50", containerName])
-
-        let lines = output.components(separatedBy: "\n")
-        for line in lines.reversed() {
-            if line.contains("[STATS]") {
-                var upload = "-"
-                var download = "-"
-
-                // Extract "Up: X.X GB" value
-                if let upRange = line.range(of: "Up: ") {
-                    let start = upRange.upperBound
-                    let remaining = String(line[start...])
-                    if let pipeIndex = remaining.firstIndex(of: "|") {
-                        upload = String(remaining[..<pipeIndex]).trimmingCharacters(in: .whitespaces)
-                    } else {
-                        let parts = remaining.components(separatedBy: " ")
-                        if parts.count >= 2 {
-                            upload = "\(parts[0]) \(parts[1])"
-                        }
-                    }
-                }
-
-                // Extract "Down: X.X GB" value
-                if let downRange = line.range(of: "Down: ") {
-                    let start = downRange.upperBound
-                    let remaining = String(line[start...])
-                    if let pipeIndex = remaining.firstIndex(of: "|") {
-                        download = String(remaining[..<pipeIndex]).trimmingCharacters(in: .whitespaces)
-                    } else {
-                        let parts = remaining.components(separatedBy: " ")
-                        if parts.count >= 2 {
-                            download = "\(parts[0]) \(parts[1])"
-                        } else {
-                            download = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
-                        }
-                    }
-                }
-
-                if upload != "-" || download != "-" {
-                    return (upload, download)
-                }
-            }
-        }
-        return nil
+    var config: (maxClients: String, bandwidth: String)? {
+        let args = run("docker", "inspect", "--format", "{{.Args}}", container)
+        let maxClients = extractInt(from: args, after: "--max-clients ")
+        let bw = extractInt(from: args, after: "--bandwidth ")
+        return (maxClients > 0 ? "\(maxClients)" : "-",
+                bw == -1 ? "Unlimited" : bw > 0 ? "\(bw) Mbps" : "-")
     }
 
-    /// Gets the Node ID from the container's key file.
-    /// Gets container configuration (max-clients and bandwidth).
-    func getContainerConfig() -> (maxClients: String, bandwidth: String)? {
-        let output = runCommand("docker", arguments: ["inspect", "--format", "{{.Args}}", containerName])
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    // MARK: Helpers
 
-        var maxClients = "-"
-        var bandwidth = "-"
-
-        // Extract --max-clients value
-        if let range = trimmed.range(of: "--max-clients ") {
-            let start = range.upperBound
-            var numStr = ""
-            for char in trimmed[start...] {
-                if char.isNumber {
-                    numStr.append(char)
-                } else {
-                    break
-                }
-            }
-            if !numStr.isEmpty {
-                maxClients = numStr
-            }
-        }
-
-        // Extract --bandwidth value
-        if let range = trimmed.range(of: "--bandwidth ") {
-            let start = range.upperBound
-            var numStr = ""
-            for char in trimmed[start...] {
-                if char.isNumber || char == "-" {
-                    numStr.append(char)
-                } else {
-                    break
-                }
-            }
-            if numStr == "-1" {
-                bandwidth = "Unlimited"
-            } else if !numStr.isEmpty {
-                bandwidth = "\(numStr) Mbps"
-            }
-        }
-
-        return (maxClients, bandwidth)
+    private var recentStatsLine: String? {
+        run("docker", "logs", "--tail", "50", container)
+            .components(separatedBy: "\n")
+            .reversed()
+            .first { $0.contains("[STATS]") }
     }
 
-    // MARK: Command Execution
+    private func extractInt(from text: String, after prefix: String) -> Int {
+        guard let range = text.range(of: prefix) else { return 0 }
+        var num = ""
+        for char in text[range.upperBound...] {
+            if char.isNumber || (char == "-" && num.isEmpty) { num.append(char) }
+            else { break }
+        }
+        return Int(num) ?? 0
+    }
 
-    /// Executes a shell command and returns its output.
-    /// Handles the special case of GUI apps not inheriting shell PATH by using absolute paths for Docker.
-    private func runCommand(_ command: String, arguments: [String]) -> String {
+    private func extractValue(from text: String, after prefix: String) -> String {
+        guard let range = text.range(of: prefix) else { return "-" }
+        let rest = String(text[range.upperBound...])
+        if let pipe = rest.firstIndex(of: "|") {
+            return String(rest[..<pipe]).trimmingCharacters(in: .whitespaces)
+        }
+        let parts = rest.components(separatedBy: " ")
+        return parts.count >= 2 ? "\(parts[0]) \(parts[1])" : rest.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private let dockerPaths = [
+        "/usr/local/bin/docker",
+        "/opt/homebrew/bin/docker",
+        "/Applications/Docker.app/Contents/Resources/bin/docker"
+    ]
+
+    private func run(_ command: String, _ args: String...) -> String {
         let process = Process()
         let pipe = Pipe()
 
-        // GUI apps don't inherit shell PATH, so we need to find Docker binary manually
-        let executablePath: String
-        if command == "docker" {
-            let dockerPaths = [
-                "/usr/local/bin/docker",
-                "/opt/homebrew/bin/docker",
-                "/Applications/Docker.app/Contents/Resources/bin/docker"
-            ]
-            executablePath = dockerPaths.first { FileManager.default.fileExists(atPath: $0) } ?? "/usr/local/bin/docker"
-        } else {
-            executablePath = "/usr/bin/env"
-        }
+        let path = command == "docker"
+            ? dockerPaths.first { FileManager.default.fileExists(atPath: $0) } ?? "/usr/local/bin/docker"
+            : "/usr/bin/env"
 
-        if command == "docker" {
-            process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = arguments
-        } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [command] + arguments
-        }
-
-        // Capture both stdout and stderr
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = command == "docker" ? Array(args) : [command] + args
         process.standardOutput = pipe
         process.standardError = pipe
 
         do {
             try process.run()
             process.waitUntilExit()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8) ?? ""
+            return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         } catch {
             return ""
         }
