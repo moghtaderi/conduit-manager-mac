@@ -60,7 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Properties
 
     /// App version - displayed in menu
-    let appVersion = "1.5.7"
+    let appVersion = "1.5.8"
 
     /// The status bar item that appears in the macOS menu bar
     var statusItem: NSStatusItem?
@@ -181,6 +181,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let pathItem = NSMenuItem(title: "Path: \(scriptPath)", action: #selector(copyScriptPath), keyEquivalent: "")
         pathItem.tag = 301
         menu.addItem(pathItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Node ID - click to copy (tag 400)
+        let nodeIdItem = NSMenuItem(title: "Node ID: -", action: #selector(copyNodeId), keyEquivalent: "")
+        nodeIdItem.tag = 400
+        menu.addItem(nodeIdItem)
+
+        // Max clients (tag 401)
+        let maxClientsItem = createInfoMenuItem(title: "Max Clients: -", tag: 401)
+        menu.addItem(maxClientsItem)
+
+        // Bandwidth limit (tag 402)
+        let bandwidthItem = createInfoMenuItem(title: "Bandwidth: -", tag: 402)
+        menu.addItem(bandwidthItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -329,6 +344,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let downloadItem = menu.item(withTag: 300) {
                 downloadItem.isHidden = dockerStatus != .notInstalled
             }
+
+            // Node ID (tag 400)
+            if let nodeIdItem = menu.item(withTag: 400) {
+                if dockerStatus == .running, let nodeId = manager.getNodeId() {
+                    // Truncate for display but store full ID
+                    let displayId = nodeId.count > 20 ? String(nodeId.prefix(20)) + "..." : nodeId
+                    nodeIdItem.title = "Node ID: \(displayId)"
+                    nodeIdItem.isHidden = false
+                    nodeIdItem.isEnabled = true
+                } else {
+                    nodeIdItem.title = "Node ID: -"
+                    nodeIdItem.isHidden = dockerStatus != .running
+                }
+            }
+
+            // Max clients (tag 401)
+            if let maxClientsItem = menu.item(withTag: 401) {
+                if dockerStatus == .running, let config = manager.getContainerConfig() {
+                    updateInfoMenuItem(maxClientsItem, title: "Max Clients: \(config.maxClients)")
+                    maxClientsItem.isHidden = false
+                } else {
+                    updateInfoMenuItem(maxClientsItem, title: "Max Clients: -")
+                    maxClientsItem.isHidden = dockerStatus != .running
+                }
+            }
+
+            // Bandwidth (tag 402)
+            if let bandwidthItem = menu.item(withTag: 402) {
+                if dockerStatus == .running, let config = manager.getContainerConfig() {
+                    updateInfoMenuItem(bandwidthItem, title: "Bandwidth: \(config.bandwidth)")
+                    bandwidthItem.isHidden = false
+                } else {
+                    updateInfoMenuItem(bandwidthItem, title: "Bandwidth: -")
+                    bandwidthItem.isHidden = dockerStatus != .running
+                }
+            }
         }
     }
 
@@ -378,6 +429,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(scriptPath, forType: .string)
         showNotification(title: "Copied", body: "Script path copied to clipboard")
+    }
+
+    /// Copies the Node ID to the clipboard.
+    @objc func copyNodeId() {
+        if let nodeId = conduitManager?.getNodeId(), !nodeId.isEmpty {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(nodeId, forType: .string)
+            showNotification(title: "Copied", body: "Node ID copied to clipboard")
+        } else {
+            showNotification(title: "Error", body: "Node ID not available")
+        }
     }
 
     /// Opens Terminal and runs the conduit-mac.sh script.
@@ -645,6 +707,71 @@ class ConduitManager {
             }
         }
         return nil
+    }
+
+    /// Gets the Node ID from the container's key file.
+    func getNodeId() -> String? {
+        let output = runCommand("docker", arguments: [
+            "run", "--rm", "-v", "conduit-data:/data", "alpine",
+            "cat", "/data/conduit_key.json"
+        ])
+
+        // Extract privateKeyBase64 and derive node ID
+        guard let range = output.range(of: "\"privateKeyBase64\":\"") else { return nil }
+        let start = range.upperBound
+        guard let endRange = output[start...].range(of: "\"") else { return nil }
+        let base64Key = String(output[start..<endRange.lowerBound])
+
+        // Decode base64, take last 32 bytes, re-encode
+        guard let keyData = Data(base64Encoded: base64Key) else { return nil }
+        guard keyData.count >= 32 else { return nil }
+        let last32 = keyData.suffix(32)
+        return last32.base64EncodedString().replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Gets container configuration (max-clients and bandwidth).
+    func getContainerConfig() -> (maxClients: String, bandwidth: String)? {
+        let output = runCommand("docker", arguments: ["inspect", "--format", "{{.Args}}", containerName])
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var maxClients = "-"
+        var bandwidth = "-"
+
+        // Extract --max-clients value
+        if let range = trimmed.range(of: "--max-clients ") {
+            let start = range.upperBound
+            var numStr = ""
+            for char in trimmed[start...] {
+                if char.isNumber {
+                    numStr.append(char)
+                } else {
+                    break
+                }
+            }
+            if !numStr.isEmpty {
+                maxClients = numStr
+            }
+        }
+
+        // Extract --bandwidth value
+        if let range = trimmed.range(of: "--bandwidth ") {
+            let start = range.upperBound
+            var numStr = ""
+            for char in trimmed[start...] {
+                if char.isNumber || char == "-" {
+                    numStr.append(char)
+                } else {
+                    break
+                }
+            }
+            if numStr == "-1" {
+                bandwidth = "Unlimited"
+            } else if !numStr.isEmpty {
+                bandwidth = "\(numStr) Mbps"
+            }
+        }
+
+        return (maxClients, bandwidth)
     }
 
     // MARK: Command Execution

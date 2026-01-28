@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.5.7"                                          # Script version
+readonly VERSION="1.5.8"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -1587,10 +1587,23 @@ show_security_info() {
     echo "  no-new-privileges security option is enabled."
     echo "  Container cannot escalate to root."
     echo ""
+    # Get current max-clients from container to calculate PIDs limit
+    local current_max_clients=""
+    local pids_display="(dynamic: max-clients + 50)"
+    if container_exists; then
+        local container_args=""
+        container_args=$(docker inspect --format='{{.Args}}' "$CONTAINER_NAME" 2>/dev/null) || container_args=""
+        current_max_clients=$(echo "$container_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || current_max_clients=""
+        if [ -n "$current_max_clients" ]; then
+            local current_pids=$((current_max_clients + 50))
+            pids_display="${current_pids} maximum (max-clients + 50)"
+        fi
+    fi
+
     echo -e "${BOLD}Resource Limits:${NC}"
     echo "  Memory:     $MAX_MEMORY maximum"
     echo "  CPU:        $MAX_CPUS cores maximum"
-    echo "  Processes:  100 maximum (prevents fork bombs)"
+    echo "  Processes:  $pids_display"
     echo ""
     echo "══════════════════════════════════════════════════════"
     echo ""
