@@ -19,14 +19,35 @@ enum DockerStatus {
     case notInstalled, notRunning, running
 }
 
+enum TerminalApp: String, CaseIterable {
+    case terminal = "Terminal"
+    case iterm = "iTerm"
+
+    var isInstalled: Bool {
+        switch self {
+        case .terminal: return true  // Always available on macOS
+        case .iterm: return FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
+        }
+    }
+}
+
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "1.6.0"
+    private let version = "1.6.1"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
+
+    private var preferredTerminal: TerminalApp {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: "preferredTerminal"),
+                  let app = TerminalApp(rawValue: raw) else { return .terminal }
+            return app
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "preferredTerminal") }
+    }
 
     // MARK: Lifecycle
 
@@ -64,7 +85,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Utilities
         menu.addItem(actionItem("Download Docker Desktop...", action: #selector(openDockerDownload), tag: 300, hidden: true))
-        menu.addItem(actionItem("Open Terminal Manager...", action: #selector(openTerminal), key: "t"))
+
+        // Terminal submenu
+        let terminalItem = NSMenuItem(title: "Open Terminal Manager", action: nil, keyEquivalent: "t")
+        let terminalSubmenu = NSMenu()
+        for app in TerminalApp.allCases where app.isInstalled {
+            let item = NSMenuItem(title: "Open in \(app.rawValue)", action: #selector(openInTerminal(_:)), keyEquivalent: "")
+            item.representedObject = app
+            item.state = (app == preferredTerminal) ? .on : .off
+            terminalSubmenu.addItem(item)
+        }
+        terminalSubmenu.addItem(.separator())
+        let defaultItem = NSMenuItem(title: "Default: \(preferredTerminal.rawValue)", action: nil, keyEquivalent: "")
+        defaultItem.isEnabled = false
+        defaultItem.tag = 310
+        terminalSubmenu.addItem(defaultItem)
+        terminalItem.submenu = terminalSubmenu
+        terminalItem.tag = 305
+        menu.addItem(terminalItem)
 
         let scriptPath = findScript() ?? "~/conduit-manager/conduit-mac.sh"
         menu.addItem(actionItem("Path: \(scriptPath)", action: #selector(copyPath), tag: 301))
@@ -267,18 +305,67 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         notify("Copied", "Script path copied to clipboard")
     }
 
-    @objc private func openTerminal() {
+    @objc private func openInTerminal(_ sender: NSMenuItem) {
+        guard let app = sender.representedObject as? TerminalApp else { return }
         guard let path = findScript() else {
             notify("Error", "Conduit script not found")
             return
         }
-        let script = """
-            tell application "Terminal"
-                activate
-                do script "\(path)"
-            end tell
-            """
+
+        // Save as new default
+        preferredTerminal = app
+        updateTerminalMenu()
+
+        let script: String
+        switch app {
+        case .terminal:
+            // Reuse existing window if possible, otherwise create new
+            script = """
+                tell application "Terminal"
+                    if (count of windows) > 0 then
+                        do script "\(path)" in front window
+                    else
+                        do script "\(path)"
+                    end if
+                    activate
+                end tell
+                """
+        case .iterm:
+            script = """
+                tell application "iTerm"
+                    activate
+                    if (count of windows) > 0 then
+                        tell current window
+                            create tab with default profile
+                            tell current session to write text "\(path)"
+                        end tell
+                    else
+                        create window with default profile
+                        tell current window
+                            tell current session to write text "\(path)"
+                        end tell
+                    end if
+                end tell
+                """
+        }
         NSAppleScript(source: script)?.executeAndReturnError(nil)
+    }
+
+    private func updateTerminalMenu() {
+        guard let menu = statusItem?.menu,
+              let terminalItem = menu.item(withTag: 305),
+              let submenu = terminalItem.submenu else { return }
+
+        // Update checkmarks
+        for item in submenu.items {
+            if let app = item.representedObject as? TerminalApp {
+                item.state = (app == preferredTerminal) ? .on : .off
+            }
+        }
+        // Update default label
+        if let defaultItem = submenu.item(withTag: 310) {
+            defaultItem.title = "Default: \(preferredTerminal.rawValue)"
+        }
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }

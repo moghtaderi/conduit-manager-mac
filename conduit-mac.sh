@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.6.0"                                          # Script version
+readonly VERSION="1.6.1"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
