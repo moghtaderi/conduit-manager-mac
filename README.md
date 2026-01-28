@@ -81,7 +81,7 @@ The menu bar app gives you quick control without opening Terminal:
 │ Max Clients: 250            │
 │ Bandwidth: 15 Mbps          │
 ├─────────────────────────────┤
-│ Version 1.5.8               │
+│ Version 1.5.9               │
 │ Quit                   ⌘Q   │
 └─────────────────────────────┘
 ```

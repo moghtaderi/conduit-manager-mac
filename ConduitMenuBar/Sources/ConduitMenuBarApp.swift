@@ -60,7 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Properties
 
     /// App version - displayed in menu
-    let appVersion = "1.5.8"
+    let appVersion = "1.5.9"
 
     /// The status bar item that appears in the macOS menu bar
     var statusItem: NSStatusItem?

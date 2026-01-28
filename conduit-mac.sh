@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.5.8"                                          # Script version
+readonly VERSION="1.5.9"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -2099,8 +2099,72 @@ check_for_updates() {
     # Make it executable
     chmod +x "$script_path"
 
+    echo -e "${GREEN}✔ Script updated${NC}"
+
+    # Now update the menu bar app
+    echo ""
+    echo "Downloading Menu Bar App..."
+
+    local app_zip_url="https://github.com/moghtaderi/conduit-manager-mac/releases/latest/download/Conduit-Mac-MenuBar-macOS.zip"
+    local temp_zip=""
+    temp_zip=$(mktemp "${TMPDIR:-/tmp}/conduit-menubar.XXXXXX.zip")
+    local temp_extract_dir=""
+    temp_extract_dir=$(mktemp -d "${TMPDIR:-/tmp}/conduit-menubar-extract.XXXXXX")
+
+    if curl -sL --max-time 60 -o "$temp_zip" "$app_zip_url" 2>/dev/null; then
+        # Verify it's a valid zip file
+        if unzip -t "$temp_zip" >/dev/null 2>&1; then
+            # Extract to temp directory
+            if unzip -q -o "$temp_zip" -d "$temp_extract_dir" 2>/dev/null; then
+                # Find the .app bundle in the extracted files
+                local extracted_app=""
+                extracted_app=$(find "$temp_extract_dir" -name "Conduit-Mac.app" -type d 2>/dev/null | head -1)
+
+                if [ -n "$extracted_app" ] && [ -d "$extracted_app" ]; then
+                    # Remove old app if it exists
+                    local install_path="${HOME}/conduit-manager/Conduit-Mac.app"
+                    rm -rf "$install_path" 2>/dev/null
+
+                    # Move new app into place
+                    if mv "$extracted_app" "$install_path" 2>/dev/null; then
+                        # Clear quarantine attribute so macOS allows it to run
+                        xattr -rd com.apple.quarantine "$install_path" 2>/dev/null
+                        echo -e "${GREEN}✔ Menu Bar App updated${NC}"
+                        log_info "Menu Bar App updated to $remote_version"
+
+                        # If the app is currently running, notify user to restart it
+                        if pgrep -x "Conduit-Mac" >/dev/null 2>&1; then
+                            echo ""
+                            echo -e "${YELLOW}Note: Quit and reopen the Menu Bar App to use the new version.${NC}"
+                        fi
+                    else
+                        echo -e "${YELLOW}⚠ Could not install Menu Bar App (script updated OK)${NC}"
+                        log_warn "Menu Bar App install failed - could not move to destination"
+                    fi
+                else
+                    echo -e "${YELLOW}⚠ Menu Bar App not found in download (script updated OK)${NC}"
+                    log_warn "Menu Bar App not found in extracted zip"
+                fi
+            else
+                echo -e "${YELLOW}⚠ Could not extract Menu Bar App (script updated OK)${NC}"
+                log_warn "Menu Bar App extraction failed"
+            fi
+        else
+            echo -e "${YELLOW}⚠ Menu Bar App download invalid (script updated OK)${NC}"
+            log_warn "Menu Bar App zip verification failed"
+        fi
+    else
+        echo -e "${YELLOW}⚠ Could not download Menu Bar App (script updated OK)${NC}"
+        log_warn "Menu Bar App download failed"
+    fi
+
+    # Clean up temp files
+    rm -f "$temp_zip" 2>/dev/null
+    rm -rf "$temp_extract_dir" 2>/dev/null
+
     log_info "Auto-update completed: $VERSION -> $remote_version"
 
+    echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}✔ Update installed successfully!${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
