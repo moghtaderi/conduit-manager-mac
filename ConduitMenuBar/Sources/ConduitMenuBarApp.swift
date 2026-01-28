@@ -60,7 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Properties
 
     /// App version - displayed in menu
-    let appVersion = "1.5.9"
+    let appVersion = "1.5.10"
 
     /// The status bar item that appears in the macOS menu bar
     var statusItem: NSStatusItem?
@@ -711,9 +711,9 @@ class ConduitManager {
 
     /// Gets the Node ID from the container's key file.
     func getNodeId() -> String? {
+        // Use docker exec on the running container (fast) instead of docker run alpine (slow)
         let output = runCommand("docker", arguments: [
-            "run", "--rm", "-v", "conduit-data:/data", "alpine",
-            "cat", "/data/conduit_key.json"
+            "exec", containerName, "cat", "/data/conduit_key.json"
         ])
 
         // Extract privateKeyBase64 and derive node ID

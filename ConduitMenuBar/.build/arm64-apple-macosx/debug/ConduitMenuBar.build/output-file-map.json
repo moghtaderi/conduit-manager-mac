@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/RezMac/Documents/GitHub/conduit-manager-mac/ConduitMenuBar/.build/arm64-apple-macosx/debug/ConduitMenuBar.build/master.swiftdeps"
+  },
+  "/Users/RezMac/Documents/GitHub/conduit-manager-mac/ConduitMenuBar/Sources/ConduitMenuBarApp.swift": {
+    "dependencies": "/Users/RezMac/Documents/GitHub/conduit-manager-mac/ConduitMenuBar/.build/arm64-apple-macosx/debug/ConduitMenuBar.build/ConduitMenuBarApp.d",
+    "object": "/Users/RezMac/Documents/GitHub/conduit-manager-mac/ConduitMenuBar/.build/arm64-apple-macosx/debug/ConduitMenuBar.build/ConduitMenuBarApp.swift.o",
+    "swiftmodule": "/Users/RezMac/Documents/GitHub/conduit-manager-mac/ConduitMenuBar/.build/arm64-apple-macosx/debug/ConduitMenuBar.build/ConduitMenuBarApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/RezMac/Documents/GitHub/conduit-manager-mac/ConduitMenuBar/.build/arm64-apple-macosx/debug/ConduitMenuBar.build/ConduitMenuBarApp.swiftdeps",
+    "diagnostics": "/Users/RezMac/Documents/GitHub/conduit-manager-mac/ConduitMenuBar/.build/arm64-apple-macosx/debug/ConduitMenuBar.build/ConduitMenuBarApp.dia"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd local install option for users without admin privileges\n\n- Add sudo privilege detection \\(checks root, sudo -n, admin/wheel groups\\)\n- Default to ~/.local/bin and ~/.local/share/conduit when no sudo access\n- Automatically configure PATH in .zshrc, .bash_profile, or .profile\n- Show install type indicator \\(System-wide vs Local\\) during installation\n- Update completion message to show symlink path and local install notes\n\nAddresses PR feedback requesting support for non-admin users.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(gh pr create --repo polamgh/conduit-manager-mac --title \"Add local install option and rename app to Conduit-Mac\" --body \"$\\(cat <<''EOF''\n## Summary\n- Add local install option for users without admin privileges \\(installs to `~/.local/bin`\\)\n- Rename app from `Conduit.app` to `Conduit-Mac.app` to avoid conflicts with other macOS apps named \"Conduit\"\n- Update all repository URLs to point to `polamgh/conduit-manager-mac`\n\n## Changes\n\n### Local Install Support\nThe installer now automatically detects sudo privileges and adjusts accordingly:\n\n**Privilege Detection:**\n- Checks if running as root\n- Tests `sudo -n` for passwordless sudo access\n- Checks membership in `admin`/`wheel`/`sudo` groups\n\n**Install Paths:**\n| Scenario | Binary Path | Data Path |\n|----------|-------------|-----------|\n| With sudo | `/usr/local/bin` | `/usr/local/share/conduit` |\n| Without sudo | `~/.local/bin` | `~/.local/share/conduit` |\n\n**PATH Configuration:**\nFor local installs, the script automatically adds `~/.local/bin` to PATH in the appropriate shell profile:\n- `.zshrc` for zsh users \\(macOS default\\)\n- `.bash_profile` or `.bashrc` for bash users\n- `.profile` as fallback\n\n### App Rename\n- `Conduit.app` → `Conduit-Mac.app`\n- Bundle ID: `com.psiphon.conduit-mac-menubar`\n- Release artifact: `Conduit-Mac-MenuBar-macOS.zip`\n\n## Test plan\n- [ ] Test install on system with sudo access \\(should use `/usr/local/bin`\\)\n- [ ] Test install on system without sudo access \\(should use `~/.local/bin`\\)\n- [ ] Verify PATH is added to shell profile for local installs\n- [ ] Verify `Conduit-Mac.app` builds and runs correctly\n- [ ] Verify install script downloads correct release artifact\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\nEOF\n\\)\")",
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(git reset:*)",
+      "Bash(git pull:*)",
+      "Bash(gh release list:*)",
+      "Bash(gh release view:*)",
+      "Bash(./build-app.sh:*)",
+      "Bash(zip:*)",
+      "Bash(gh release create v1.5.5 /Users/RezMac/Documents/GitHub/conduit-manager-mac/ConduitMenuBar/Conduit-Mac-MenuBar-macOS.zip --repo moghtaderi/conduit-manager-mac --title \"v1.5.5 - Conduit-Mac\" --notes \"$\\(cat <<''EOF''\n## Changes\n- Renamed app from `Conduit.app` to `Conduit-Mac.app` to avoid conflicts with other macOS apps\n- Added local install option for users without admin privileges\n- Installer now auto-detects sudo access and uses `~/.local/bin` when needed\n- PATH automatically configured in shell profile for local installs\n\n## Install\n```bash\ncurl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash\n```\nEOF\n\\)\")",
+      "Bash(curl:*)",
+      "Bash(gh api:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(bash -n:*)",
+      "Bash(swift build:*)",
+      "Bash(gh release create:*)",
+      "Bash(git push)",
+      "Bash(docker pull:*)",
+      "Bash(vm_stat:*)",
+      "Bash(git tag:*)",
+      "Bash(bash:*)",
+      "Bash(docker run:*)"
+    ]
+  }
+}
