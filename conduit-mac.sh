@@ -40,7 +40,7 @@ readonly VERSION="1.5.6"                                          # Script versi
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
 readonly IMAGE="ghcr.io/ssmirr/conduit/conduit:2fd31d4"          # Docker image to deploy
-readonly IMAGE_DIGEST=""  # No digest verification for this release
+readonly IMAGE_DIGEST="sha256:ee456f56751683afd8c1c85ecbeb8bd8871c1b8f9f5057ab1951a60c31c30a7f"  # Expected SHA256
 readonly VOLUME_NAME="conduit-data"                               # Persistent data volume
 readonly NETWORK_NAME="conduit-network"                           # Isolated bridge network
 readonly LOG_FILE="${HOME}/.conduit-manager.log"                  # Local log file path
