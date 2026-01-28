@@ -1363,10 +1363,10 @@ view_dashboard() {
             echo -e " ${BOLD}TRAFFIC${NC}${CL}"
             echo -e "   Upload:     ${CYAN}${up}${NC}    | Download: ${CYAN}${down}${NC}${CL}"
             echo "──────────────────────────────────────────────────────${CL}"
-            echo -e " ${BOLD}RESOURCES${NC}      Container              System${CL}"
-            printf "   CPU:      ${YELLOW}%-22s${NC} ${YELLOW}%s${NC}${CL}\n" "$cpu" "$sys_cpu"
-            printf "   RAM:      ${YELLOW}%-22s${NC} ${YELLOW}%s${NC}${CL}\n" "$ram" "${sys_ram_used} / ${sys_ram_total}"
-            printf "   Limits:   ${CYAN}%-22s${NC}${CL}\n" "${container_cpu_cores} CPU / ${container_mem_gb} GB RAM"
+            printf " ${BOLD}%-12s${NC} %-20s %s${CL}\n" "RESOURCES" "Container" "System"
+            printf "   %-9s ${YELLOW}%-20s${NC} ${YELLOW}%s${NC}${CL}\n" "CPU:" "$cpu" "$sys_cpu"
+            printf "   %-9s ${YELLOW}%-20s${NC} ${YELLOW}%s${NC}${CL}\n" "RAM:" "$ram" "${sys_ram_used} / ${sys_ram_total}"
+            printf "   %-9s ${CYAN}%-20s${NC}${CL}\n" "Limits:" "${container_cpu_cores} CPU / ${container_mem_gb} GB RAM"
             if [ "$limits_match" = false ]; then
                 echo -e "   ${YELLOW}⚠ Config: ${MAX_CPUS} CPU / ${config_mem_gb} GB - Restart to apply${NC}${CL}"
             fi
