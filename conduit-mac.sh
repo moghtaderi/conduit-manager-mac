@@ -1670,36 +1670,44 @@ health_check() {
         warnings=$((warnings + 1))
     fi
 
-    # 7. Check if Conduit has connected to network
+    # 7 & 8. Check Psiphon connection and stats (done together since stats implies connection)
+    local stats_count=""
+    if container_running; then
+        stats_count=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[STATS\]" 2>/dev/null | head -1 || echo "0")
+        stats_count=${stats_count:-0}
+    fi
+
     echo -n "  Psiphon connection:   "
     if container_running; then
-        local connected=""
-        connected=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "Connected to Psiphon" 2>/dev/null | head -1 || echo "0")
-        connected=${connected:-0}
-        if [ "$connected" -gt 0 ] 2>/dev/null; then
+        # If we have stats, we're definitely connected (stats only log when connected)
+        if [ "$stats_count" -gt 0 ] 2>/dev/null; then
             echo -e "${GREEN}OK${NC} (Connected to Psiphon network)"
         else
-            local info_lines=""
-            info_lines=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[INFO\]" 2>/dev/null | head -1 || echo "0")
-            info_lines=${info_lines:-0}
-            if [ "$info_lines" -gt 0 ] 2>/dev/null; then
-                echo -e "${YELLOW}CONNECTING${NC} - Establishing connection..."
-                warnings=$((warnings + 1))
+            # Check for explicit connection message
+            local connected=""
+            connected=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "Connected to Psiphon" 2>/dev/null | head -1 || echo "0")
+            connected=${connected:-0}
+            if [ "$connected" -gt 0 ] 2>/dev/null; then
+                echo -e "${GREEN}OK${NC} (Connected to Psiphon network)"
             else
-                echo -e "${YELLOW}STARTING${NC} - Initializing..."
-                warnings=$((warnings + 1))
+                local info_lines=""
+                info_lines=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[INFO\]" 2>/dev/null | head -1 || echo "0")
+                info_lines=${info_lines:-0}
+                if [ "$info_lines" -gt 0 ] 2>/dev/null; then
+                    echo -e "${YELLOW}CONNECTING${NC} - Establishing connection..."
+                    warnings=$((warnings + 1))
+                else
+                    echo -e "${YELLOW}STARTING${NC} - Initializing..."
+                    warnings=$((warnings + 1))
+                fi
             fi
         fi
     else
         echo -e "${RED}N/A${NC} - Container not running"
     fi
 
-    # 8. Check stats output
     echo -n "  Stats output:         "
     if container_running; then
-        local stats_count=""
-        stats_count=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[STATS\]" 2>/dev/null | head -1 || echo "0")
-        stats_count=${stats_count:-0}
         if [ "$stats_count" -gt 0 ] 2>/dev/null; then
             echo -e "${GREEN}OK${NC} (${stats_count} entries)"
         else
