@@ -394,16 +394,18 @@ get_system_stats() {
 
     # Get RAM from vm_stat (macOS)
     if command -v vm_stat &>/dev/null; then
-        local page_size=4096
-        local pages_free pages_active pages_inactive pages_speculative pages_wired
+        # Get page size dynamically (16384 on Apple Silicon, 4096 on older Intel)
+        local page_size
+        page_size=$(vm_stat 2>/dev/null | head -1 | grep -o '[0-9]*') || page_size=16384
 
-        pages_free=$(vm_stat 2>/dev/null | awk '/Pages free/ {print $3}' | tr -d '.') || pages_free=0
+        local pages_active pages_wired pages_compressed pages_occupied_by_compressor
+
         pages_active=$(vm_stat 2>/dev/null | awk '/Pages active/ {print $3}' | tr -d '.') || pages_active=0
-        pages_inactive=$(vm_stat 2>/dev/null | awk '/Pages inactive/ {print $3}' | tr -d '.') || pages_inactive=0
-        pages_speculative=$(vm_stat 2>/dev/null | awk '/Pages speculative/ {print $3}' | tr -d '.') || pages_speculative=0
         pages_wired=$(vm_stat 2>/dev/null | awk '/Pages wired/ {print $4}' | tr -d '.') || pages_wired=0
+        pages_compressed=$(vm_stat 2>/dev/null | awk '/Pages occupied by compressor/ {print $5}' | tr -d '.') || pages_compressed=0
 
-        local used_bytes=$(( (pages_active + pages_wired) * page_size ))
+        # Memory Used = Active + Wired + Compressed (matches Activity Monitor)
+        local used_bytes=$(( (pages_active + pages_wired + pages_compressed) * page_size ))
         local total_bytes
         total_bytes=$(sysctl -n hw.memsize 2>/dev/null) || total_bytes=0
 
