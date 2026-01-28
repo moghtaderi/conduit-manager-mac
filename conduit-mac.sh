@@ -1357,7 +1357,7 @@ view_dashboard() {
             echo "──────────────────────────────────────────────────────${CL}"
             echo -e " ${BOLD}RESOURCES${NC}           Container         System${CL}"
             echo -e "   CPU:        ${YELLOW}${cpu}${NC}         ${YELLOW}${sys_cpu}${NC}${CL}"
-            echo -e "   RAM:        ${YELLOW}${ram}${NC}    ${YELLOW}${sys_ram_used}${NC}${CL}"
+            echo -e "   RAM:        ${YELLOW}${ram}${NC}    ${YELLOW}${sys_ram_used} / ${sys_ram_total}${NC}${CL}"
             echo -e "   Limits:     ${CYAN}${container_cpu_cores} CPU / ${container_mem_gb} GB RAM${NC}${CL}"
             if [ "$limits_match" = false ]; then
                 echo -e "   ${YELLOW}⚠ Config: ${MAX_CPUS} CPU / ${config_mem_gb} GB - Restart to apply${NC}${CL}"
