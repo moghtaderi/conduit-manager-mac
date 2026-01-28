@@ -13,7 +13,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-blue" alt="macOS">
   <img src="https://img.shields.io/badge/requires-Docker%20Desktop-blue" alt="Docker">
-  <img src="https://img.shields.io/github/v/release/moghtaderi/conduit-manager-mac" alt="Release">
+  <img src="https://img.shields.io/github/v/release/polamgh/conduit-manager-mac" alt="Release">
 </p>
 
 ---
@@ -39,7 +39,7 @@ Download from **[docker.com/products/docker-desktop](https://www.docker.com/prod
 ### Step 2: Install Conduit Manager
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/polamgh/conduit-manager-mac/main/install.sh | bash
 ```
 
 ### Step 3: Run Setup
@@ -169,7 +169,7 @@ rm -rf ~/conduit-manager ~/.conduit-*
 </div>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/polamgh/conduit-manager-mac/main/install.sh | bash
 ```
 
 <div dir="rtl">
