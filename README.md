@@ -24,8 +24,10 @@
 |---------|-------------|
 | **Multi-Container** | Run up to 5 Conduit nodes simultaneously |
 | **Menu Bar App** | Native macOS app - Start/Stop with one click |
+| **Dashboard Window** | Full stats view with Node IDs and QR codes |
 | **Live Stats** | See connected clients & traffic in real-time |
 | **Per-Container Control** | Start, stop, reconfigure individual containers |
+| **QR Code Support** | Scan to link nodes to Ryve app for rewards |
 | **Security Hardened** | Read-only filesystem, isolated network, seccomp |
 | **Docker Status** | Auto-detects if Docker is running |
 | **Dark Mode** | Works perfectly in light and dark mode |
@@ -79,12 +81,24 @@ Quick control without opening Terminal:
 │ ▸ ↻ Restart One...          │
 │ ▸ ■ Stop One...             │
 ├─────────────────────────────┤
+│ Open Dashboard...      ⌘D   │
 │ Open Terminal Manager...    │
 ├─────────────────────────────┤
-│ Version 2.0.5               │
 │ Quit                   ⌘Q   │
 └─────────────────────────────┘
 ```
+
+### Dashboard Window
+
+Click **Open Dashboard** (⌘D) for a full-featured window with:
+
+| Feature | Description |
+|---------|-------------|
+| **Node IDs** | View and copy Node IDs for each container |
+| **QR Codes** | Scan to claim rewards in the Ryve app |
+| **Live Stats** | Connected clients, traffic, uptime per container |
+| **Logs View** | Filter by INFO, STATS, or ERRORS |
+| **Health Check** | Docker system status and container health |
 
 ### Multi-Container Support
 
@@ -95,6 +109,7 @@ Run multiple Conduit nodes on a single Mac:
 | **Per-Container Stats** | View clients, traffic, uptime for each container |
 | **Individual Control** | Restart or stop specific containers |
 | **Aggregated Totals** | Main view shows combined stats |
+| **Unique Node IDs** | Each container has its own identity for rewards |
 
 ### Menu Bar Icons
 
