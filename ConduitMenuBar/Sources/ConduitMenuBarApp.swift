@@ -587,8 +587,11 @@ class ConduitManager {
     /// Find all configured containers (returns indices of existing containers)
     private var configuredContainers: [Int] {
         let allContainers = run("docker", "ps", "-a", "--format", "{{.Names}}")
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
         var indices: [Int] = []
         for i in 1...maxContainers {
+            // Use exact match to avoid "conduit-mac" matching "conduit-mac-2"
             if allContainers.contains(containerName(at: i)) {
                 indices.append(i)
             }
@@ -599,8 +602,11 @@ class ConduitManager {
     /// Find all running containers
     private var runningContainers: [Int] {
         let running = run("docker", "ps", "--format", "{{.Names}}")
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
         var indices: [Int] = []
         for i in 1...maxContainers {
+            // Use exact match to avoid "conduit-mac" matching "conduit-mac-2"
             if running.contains(containerName(at: i)) {
                 indices.append(i)
             }
