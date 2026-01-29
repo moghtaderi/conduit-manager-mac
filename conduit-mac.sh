@@ -2351,6 +2351,7 @@ format_bytes() {
 
 # show_peers: Display live peer traffic by country
 # Real-time updating display with GeoIP resolution
+# Compatible with Bash 3.2 (macOS default) - uses temp files instead of associative arrays
 show_peers() {
     local stop_peers=0
     trap 'stop_peers=1' SIGINT SIGTERM
@@ -2373,9 +2374,8 @@ show_peers() {
     local last_refresh=0
     local refresh_interval=10
 
-    # Declare associative arrays for country stats
-    declare -A country_ips
-    declare -A country_count
+    # Temp file for country counts (Bash 3.2 compatible - no associative arrays)
+    local country_data_file="${TMPDIR:-/tmp}/conduit_country_data.$$"
 
     while [ $stop_peers -eq 0 ]; do
         local now=$(date +%s)
@@ -2387,46 +2387,32 @@ show_peers() {
         if [ "$time_since" -ge "$refresh_interval" ] || [ "$last_refresh" -eq 0 ]; then
             last_refresh=$now
 
-            # Clear arrays
-            country_ips=()
-            country_count=()
+            # Clear temp file
+            > "$country_data_file"
 
             # Get peer IPs and resolve countries
             local ips=""
             ips=$(extract_peer_ips)
             local total_ips=0
             local resolved_count=0
+            local country_count=0
 
-            # Process IPs (limit to avoid API rate limiting)
-            local ip_list=()
+            # Process IPs and write to temp file
             while IFS= read -r ip; do
                 [ -z "$ip" ] && continue
-                ip_list+=("$ip")
                 total_ips=$((total_ips + 1))
-            done <<< "$ips"
 
-            # Resolve countries (max 40 to stay under rate limit)
-            local max_resolve=40
-            for ip in "${ip_list[@]}"; do
-                [ "$resolved_count" -ge "$max_resolve" ] && break
+                # Limit API calls
+                [ "$resolved_count" -ge 40 ] && continue
 
                 local country=""
                 country=$(geo_lookup "$ip")
                 [ -z "$country" ] && country="Unknown"
 
-                # Track unique IPs per country
-                if [ -z "${country_ips[$country]}" ]; then
-                    country_ips[$country]="$ip"
-                else
-                    # Check if IP already tracked
-                    if [[ ! "${country_ips[$country]}" =~ "$ip" ]]; then
-                        country_ips[$country]="${country_ips[$country]},$ip"
-                    fi
-                fi
-                country_count[$country]=$((${country_count[$country]:-0} + 1))
-
+                # Write IP|Country to temp file
+                echo "${country}" >> "$country_data_file"
                 resolved_count=$((resolved_count + 1))
-            done
+            done <<< "$ips"
 
             # Get container stats
             local stats_line=""
@@ -2440,6 +2426,11 @@ show_peers() {
             local net_io=""
             net_io=$(docker stats --no-stream --format "{{.NetIO}}" "$CONTAINER_NAME" 2>/dev/null)
 
+            # Count unique countries
+            if [ -f "$country_data_file" ] && [ -s "$country_data_file" ]; then
+                country_count=$(sort -u "$country_data_file" | wc -l | tr -d ' ')
+            fi
+
             # Clear screen and draw
             printf "\033[2J\033[H"
 
@@ -2450,20 +2441,24 @@ show_peers() {
             echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════╝${NC}"
             echo ""
 
-            if [ ${#country_count[@]} -gt 0 ]; then
+            if [ -s "$country_data_file" ]; then
                 echo -e "${GREEN}${BOLD} 🌍 PEERS BY COUNTRY ${NC}${DIM}(from recent connections)${NC}"
                 echo ""
                 printf " ${BOLD}%-30s %10s${NC}\n" "Country" "IPs"
                 echo " ────────────────────────────────────────"
 
-                # Sort countries by count (descending)
-                for country in "${!country_count[@]}"; do
-                    echo "${country_count[$country]}|$country"
-                done | sort -t'|' -k1 -nr | head -15 | while IFS='|' read -r count country; do
+                # Count and sort countries
+                sort "$country_data_file" | uniq -c | sort -rn | head -15 | while read -r count country; do
+                    [ -z "$country" ] && continue
                     # Create simple bar
                     local bar=""
-                    local bar_len=$((count > 20 ? 20 : count))
-                    for ((i=0; i<bar_len; i++)); do bar+="█"; done
+                    local bar_len=$count
+                    [ "$bar_len" -gt 20 ] && bar_len=20
+                    local i=0
+                    while [ $i -lt $bar_len ]; do
+                        bar="${bar}█"
+                        i=$((i + 1))
+                    done
 
                     printf " ${GREEN}%-30s${NC} %5s  ${CYAN}%s${NC}\n" "$country" "$count" "$bar"
                 done
@@ -2475,25 +2470,27 @@ show_peers() {
 
             echo ""
             echo -e " ${DIM}Total unique IPs found: ${total_ips}${NC}"
-            echo -e " ${DIM}Countries resolved: ${#country_count[@]}${NC}"
+            echo -e " ${DIM}Countries resolved: ${country_count:-0}${NC}"
             echo -e " ${DIM}GeoIP cache: ${GEOIP_CACHE}${NC}"
         fi
 
         # Progress indicator
-        local bar=""
+        local prog_bar=""
         local elapsed=$((now - last_refresh))
-        for ((i=0; i<refresh_interval; i++)); do
+        local i=0
+        while [ $i -lt $refresh_interval ]; do
             if [ $i -lt $elapsed ]; then
-                bar+="●"
+                prog_bar="${prog_bar}●"
             else
-                bar+="○"
+                prog_bar="${prog_bar}○"
             fi
+            i=$((i + 1))
         done
 
         # Position at bottom
         local term_height=$(tput lines 2>/dev/null || echo 24)
         printf "\033[${term_height};1H"
-        printf "\033[K[${YELLOW}${bar}${NC}] Next refresh in %2ds  ${DIM}[q] Back [r] Refresh${NC}" "$time_left"
+        printf "\033[K[${YELLOW}${prog_bar}${NC}] Next refresh in %2ds  ${DIM}[q] Back [r] Refresh${NC}" "$time_left"
 
         # Check for keypress
         if read -t 1 -n 1 -s key 2>/dev/null; then
@@ -2503,6 +2500,9 @@ show_peers() {
             esac
         fi
     done
+
+    # Cleanup
+    rm -f "$country_data_file"
 
     # Show cursor and restore screen
     echo -ne "\033[?25h"
