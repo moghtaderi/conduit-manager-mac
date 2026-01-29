@@ -2353,10 +2353,7 @@ format_bytes() {
 # Real-time updating display with GeoIP resolution
 # Compatible with Bash 3.2 (macOS default) - uses temp files instead of associative arrays
 show_peers() {
-    local stop_peers=0
-    trap 'stop_peers=1' SIGINT SIGTERM
-
-    # Check if container is running
+    # Check if container is running first
     if ! container_running; then
         print_header
         echo -e "${YELLOW}Container is not running.${NC}"
@@ -2364,71 +2361,80 @@ show_peers() {
         echo "Start the container first (option 1) to see peer data."
         echo ""
         read -n 1 -s -r -p "Press any key to return..."
-        return
+        return 0
     fi
+
+    # Temp file for country counts (Bash 3.2 compatible - no associative arrays)
+    local country_data_file="${TMPDIR:-/tmp}/conduit_country_data.$$"
+    local refresh_interval=10
+    local last_refresh=0
+    local stop_peers=0
 
     # Hide cursor and save screen
     tput smcup 2>/dev/null || true
     echo -ne "\033[?25l"
 
-    local last_refresh=0
-    local refresh_interval=10
-
-    # Temp file for country counts (Bash 3.2 compatible - no associative arrays)
-    local country_data_file="${TMPDIR:-/tmp}/conduit_country_data.$$"
-
-    while [ $stop_peers -eq 0 ]; do
-        local now=$(date +%s)
+    while [ "$stop_peers" -eq 0 ]; do
+        local now
+        now=$(date +%s)
         local time_since=$((now - last_refresh))
         local time_left=$((refresh_interval - time_since))
-        [ "$time_left" -lt 0 ] && time_left=0
+        if [ "$time_left" -lt 0 ]; then
+            time_left=0
+        fi
 
         # Refresh data every interval
         if [ "$time_since" -ge "$refresh_interval" ] || [ "$last_refresh" -eq 0 ]; then
             last_refresh=$now
 
             # Clear temp file
-            > "$country_data_file"
+            : > "$country_data_file"
 
             # Get peer IPs and resolve countries
             local ips=""
-            ips=$(extract_peer_ips)
+            ips=$(extract_peer_ips) || ips=""
             local total_ips=0
             local resolved_count=0
             local country_count=0
 
             # Process IPs and write to temp file
-            while IFS= read -r ip; do
-                [ -z "$ip" ] && continue
-                total_ips=$((total_ips + 1))
+            if [ -n "$ips" ]; then
+                echo "$ips" | while IFS= read -r ip; do
+                    [ -z "$ip" ] && continue
+                    total_ips=$((total_ips + 1))
 
-                # Limit API calls
-                [ "$resolved_count" -ge 40 ] && continue
+                    # Limit API calls
+                    if [ "$resolved_count" -lt 40 ]; then
+                        local country=""
+                        country=$(geo_lookup "$ip") || country="Unknown"
+                        [ -z "$country" ] && country="Unknown"
 
-                local country=""
-                country=$(geo_lookup "$ip")
-                [ -z "$country" ] && country="Unknown"
-
-                # Write IP|Country to temp file
-                echo "${country}" >> "$country_data_file"
-                resolved_count=$((resolved_count + 1))
-            done <<< "$ips"
+                        # Write country to temp file
+                        echo "${country}" >> "$country_data_file"
+                        resolved_count=$((resolved_count + 1))
+                    fi
+                done
+                # Count total IPs outside subshell
+                total_ips=$(echo "$ips" | wc -l | tr -d ' ')
+            fi
 
             # Get container stats
             local stats_line=""
-            stats_line=$(docker logs --tail 20 "$CONTAINER_NAME" 2>&1 | grep "\[STATS\]" | tail -1)
-            local connected=$(echo "$stats_line" | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p')
-            local connecting=$(echo "$stats_line" | sed -n 's/.*Connecting:[[:space:]]*\([0-9]*\).*/\1/p')
+            stats_line=$(docker logs --tail 20 "$CONTAINER_NAME" 2>&1 | grep "\[STATS\]" | tail -1) || stats_line=""
+            local connected=""
+            local connecting=""
+            connected=$(echo "$stats_line" | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p') || connected=""
+            connecting=$(echo "$stats_line" | sed -n 's/.*Connecting:[[:space:]]*\([0-9]*\).*/\1/p') || connecting=""
             connected=${connected:-0}
             connecting=${connecting:-0}
 
             # Get network I/O from docker stats
             local net_io=""
-            net_io=$(docker stats --no-stream --format "{{.NetIO}}" "$CONTAINER_NAME" 2>/dev/null)
+            net_io=$(docker stats --no-stream --format "{{.NetIO}}" "$CONTAINER_NAME" 2>/dev/null) || net_io="N/A"
 
             # Count unique countries
             if [ -f "$country_data_file" ] && [ -s "$country_data_file" ]; then
-                country_count=$(sort -u "$country_data_file" | wc -l | tr -d ' ')
+                country_count=$(sort -u "$country_data_file" 2>/dev/null | wc -l | tr -d ' ') || country_count=0
             fi
 
             # Clear screen and draw
@@ -2448,19 +2454,21 @@ show_peers() {
                 echo " ────────────────────────────────────────"
 
                 # Count and sort countries
-                sort "$country_data_file" | uniq -c | sort -rn | head -15 | while read -r count country; do
-                    [ -z "$country" ] && continue
+                sort "$country_data_file" 2>/dev/null | uniq -c | sort -rn | head -15 | while read -r cnt ctry; do
+                    [ -z "$ctry" ] && continue
                     # Create simple bar
                     local bar=""
-                    local bar_len=$count
-                    [ "$bar_len" -gt 20 ] && bar_len=20
-                    local i=0
-                    while [ $i -lt $bar_len ]; do
+                    local bar_len="$cnt"
+                    if [ "$bar_len" -gt 20 ]; then
+                        bar_len=20
+                    fi
+                    local j=0
+                    while [ "$j" -lt "$bar_len" ]; do
                         bar="${bar}█"
-                        i=$((i + 1))
+                        j=$((j + 1))
                     done
 
-                    printf " ${GREEN}%-30s${NC} %5s  ${CYAN}%s${NC}\n" "$country" "$count" "$bar"
+                    printf " ${GREEN}%-30s${NC} %5s  ${CYAN}%s${NC}\n" "$ctry" "$cnt" "$bar"
                 done
             else
                 echo ""
@@ -2469,7 +2477,7 @@ show_peers() {
             fi
 
             echo ""
-            echo -e " ${DIM}Total unique IPs found: ${total_ips}${NC}"
+            echo -e " ${DIM}Total unique IPs found: ${total_ips:-0}${NC}"
             echo -e " ${DIM}Countries resolved: ${country_count:-0}${NC}"
             echo -e " ${DIM}GeoIP cache: ${GEOIP_CACHE}${NC}"
         fi
@@ -2477,37 +2485,41 @@ show_peers() {
         # Progress indicator
         local prog_bar=""
         local elapsed=$((now - last_refresh))
-        local i=0
-        while [ $i -lt $refresh_interval ]; do
-            if [ $i -lt $elapsed ]; then
+        local k=0
+        while [ "$k" -lt "$refresh_interval" ]; do
+            if [ "$k" -lt "$elapsed" ]; then
                 prog_bar="${prog_bar}●"
             else
                 prog_bar="${prog_bar}○"
             fi
-            i=$((i + 1))
+            k=$((k + 1))
         done
 
         # Position at bottom
-        local term_height=$(tput lines 2>/dev/null || echo 24)
+        local term_height
+        term_height=$(tput lines 2>/dev/null) || term_height=24
         printf "\033[${term_height};1H"
         printf "\033[K[${YELLOW}${prog_bar}${NC}] Next refresh in %2ds  ${DIM}[q] Back [r] Refresh${NC}" "$time_left"
 
-        # Check for keypress
+        # Check for keypress (with fallback)
+        local key=""
         if read -t 1 -n 1 -s key 2>/dev/null; then
             case "$key" in
                 q|Q) stop_peers=1 ;;
                 r|R) last_refresh=0 ;;  # Force refresh
             esac
+        else
+            # read failed or timed out, sleep instead
+            sleep 1 2>/dev/null || true
         fi
     done
 
     # Cleanup
-    rm -f "$country_data_file"
+    rm -f "$country_data_file" 2>/dev/null || true
 
     # Show cursor and restore screen
     echo -ne "\033[?25h"
     tput rmcup 2>/dev/null || true
-    trap - SIGINT SIGTERM
 }
 
 # ==============================================================================
