@@ -2377,7 +2377,11 @@ uninstall_all() {
     if [ "$has_backup" = true ]; then
         echo -e "${GREEN}✔ You have ${backup_count} backup key(s) in ${BACKUP_DIR}${NC}"
     else
-        echo -e "${YELLOW}⚠ You have NO backup keys. Your node identit${CONTAINER_COUNT -gt 1 ? "ies" : "y"} will be LOST.${NC}"
+        if [ "$CONTAINER_COUNT" -gt 1 ]; then
+            echo -e "${YELLOW}⚠ You have NO backup keys. Your node identities will be LOST.${NC}"
+        else
+            echo -e "${YELLOW}⚠ You have NO backup keys. Your node identity will be LOST.${NC}"
+        fi
         echo "  Consider running 'Backup Key' first!"
     fi
     echo ""
@@ -2475,7 +2479,7 @@ uninstall_all() {
     fi
 
     echo "To reinstall, run:"
-    echo -e "  ${CYAN}curl -L -o conduit-mac.sh https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/conduit-mac.sh && chmod +x conduit-mac.sh && ./conduit-mac.sh${NC}"
+    echo -e "  ${CYAN}curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash${NC}"
     echo ""
     echo -e "${CYAN}Goodbye!${NC}"
 
