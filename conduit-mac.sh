@@ -1723,29 +1723,16 @@ health_check() {
     # 5. Check container uptime
     echo -n "  Container uptime:     "
     if container_running; then
-        local started_at=""
-        started_at=$(docker inspect --format='{{.State.StartedAt}}' "$CONTAINER_NAME" 2>/dev/null) || started_at=""
-        if [ -n "$started_at" ]; then
-            # Parse ISO timestamp and calculate duration
-            local start_epoch=""
-            # macOS date command syntax
-            start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${started_at%%.*}" "+%s" 2>/dev/null) || start_epoch=""
-            if [ -n "$start_epoch" ]; then
-                local now_epoch=$(date "+%s")
-                local diff=$((now_epoch - start_epoch))
-                local days=$((diff / 86400))
-                local hours=$(((diff % 86400) / 3600))
-                local mins=$(((diff % 3600) / 60))
-                if [ "$days" -gt 0 ]; then
-                    echo -e "${GREEN}${days}d ${hours}h ${mins}m${NC}"
-                elif [ "$hours" -gt 0 ]; then
-                    echo -e "${GREEN}${hours}h ${mins}m${NC}"
-                else
-                    echo -e "${GREEN}${mins}m${NC}"
-                fi
-            else
-                echo -e "${GREEN}Running${NC}"
-            fi
+        # Use docker ps --format to get the status which includes uptime
+        local status_str=""
+        status_str=$(docker ps --format '{{.Status}}' --filter "name=^${CONTAINER_NAME}$" 2>/dev/null | head -1) || status_str=""
+        if [ -n "$status_str" ]; then
+            # Status format: "Up 2 hours" or "Up 45 minutes" or "Up 3 days"
+            local uptime_part=""
+            uptime_part=$(echo "$status_str" | sed 's/Up //' | sed 's/ (.*)//')
+            # Shorten format: "2 hours" -> "2h", "45 minutes" -> "45m", "3 days" -> "3d"
+            uptime_part=$(echo "$uptime_part" | sed 's/ seconds\?/s/' | sed 's/ minutes\?/m/' | sed 's/ hours\?/h/' | sed 's/ days\?/d/' | sed 's/ weeks\?/w/')
+            echo -e "${GREEN}${uptime_part}${NC}"
         else
             echo -e "${GREEN}Running${NC}"
         fi
@@ -1911,14 +1898,6 @@ health_check() {
         echo -e "${YELLOW}⚠ Passed with ${warnings} warning(s)${NC}"
     else
         echo -e "${RED}✘ Some health checks failed${NC}"
-    fi
-
-    # Show connection summary if we have peer data
-    if [ "$hc_connected" -gt 0 ] 2>/dev/null || [ "$hc_connecting" -gt 0 ] 2>/dev/null; then
-        echo ""
-        echo -e "  ${BOLD}Peer Summary:${NC}"
-        echo -e "    Connected:  ${GREEN}${hc_connected}${NC} peers"
-        echo -e "    Connecting: ${YELLOW}${hc_connecting}${NC} peers"
     fi
 
     # Show node ID if available
