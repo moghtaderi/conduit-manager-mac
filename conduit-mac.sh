@@ -1562,75 +1562,6 @@ configure_resources() {
     read -n 1 -s -r -p "Press any key to return..."
 }
 
-# show_security_info: Display detailed security configuration
-show_security_info() {
-    print_header
-    echo -e "${BOLD}SECURITY CONFIGURATION${NC}"
-    echo "══════════════════════════════════════════════════════"
-    echo ""
-    echo -e "${BOLD}Image Verification:${NC}"
-    echo "  Docker images are verified using SHA256 digest."
-    echo "  Expected: ${IMAGE_DIGEST:0:20}..."
-    echo ""
-    echo -e "${BOLD}Network Isolation:${NC}"
-    echo "  The container runs on an isolated bridge network."
-    echo "  It CANNOT access the host network stack directly."
-    echo "  It CAN reach the internet (required for proxy function)."
-    echo ""
-    echo -e "${BOLD}Filesystem Protection:${NC}"
-    echo "  Container filesystem is READ-ONLY."
-    echo "  Only /tmp is writable (in-memory tmpfs)."
-    echo "  Data volume is mounted for persistent state."
-    echo ""
-    echo -e "${BOLD}Privilege Restrictions:${NC}"
-    echo "  ALL Linux capabilities are dropped except NET_BIND_SERVICE."
-    echo "  no-new-privileges security option is enabled."
-    echo "  Container cannot escalate to root."
-    echo ""
-    # Get current max-clients from container to calculate PIDs limit
-    local current_max_clients=""
-    local pids_display="(dynamic: max-clients + 50)"
-    if container_exists; then
-        local container_args=""
-        container_args=$(docker inspect --format='{{.Args}}' "$CONTAINER_NAME" 2>/dev/null) || container_args=""
-        current_max_clients=$(echo "$container_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || current_max_clients=""
-        if [ -n "$current_max_clients" ]; then
-            local current_pids=$((current_max_clients + 50))
-            pids_display="${current_pids} maximum (max-clients + 50)"
-        fi
-    fi
-
-    echo -e "${BOLD}Resource Limits:${NC}"
-    echo "  Memory:     $MAX_MEMORY maximum"
-    echo "  CPU:        $MAX_CPUS cores maximum"
-    echo "  Processes:  $pids_display"
-    echo ""
-    echo "══════════════════════════════════════════════════════"
-    echo ""
-    echo -e "${BOLD}FILE & DATA LOCATIONS${NC}"
-    echo "══════════════════════════════════════════════════════"
-    echo ""
-    echo -e "${BOLD}Application Files:${NC}"
-    echo "  Script:         ${HOME}/conduit-manager/conduit-mac.sh"
-    echo "  Menu Bar App:   ${HOME}/conduit-manager/Conduit-Mac.app"
-    echo "  Symlink:        /usr/local/bin/conduit (if installed)"
-    echo ""
-    echo -e "${BOLD}Configuration & Logs:${NC}"
-    echo "  Config File:    $CONFIG_FILE"
-    echo "  Log File:       $LOG_FILE"
-    echo "  Seccomp Profile: $SECCOMP_FILE"
-    echo "  Backups:        $BACKUP_DIR/"
-    echo ""
-    echo -e "${BOLD}Docker Resources:${NC}"
-    echo "  Container:      $CONTAINER_NAME"
-    echo "  Data Volume:    $VOLUME_NAME"
-    echo "  Network:        $NETWORK_NAME"
-    echo "  Image:          $IMAGE"
-    echo ""
-    echo "══════════════════════════════════════════════════════"
-    read -n 1 -s -r -p "Press any key to return..."
-}
-
 # show_node_info: Display node identity information
 show_node_info() {
     print_header
@@ -2385,15 +2316,15 @@ show_info_stats() {
     echo ""
     echo -e "${BOLD}Dashboard Metrics:${NC}"
     echo ""
-    echo "  ${GREEN}Connected${NC}     Number of Psiphon users currently using your node"
-    echo "  ${YELLOW}Connecting${NC}   Users in the process of establishing a connection"
-    echo "  ${CYAN}Max Clients${NC}   Your configured limit for simultaneous connections"
+    echo -e "  ${GREEN}Connected${NC}     Number of Psiphon users currently using your node"
+    echo -e "  ${YELLOW}Connecting${NC}   Users in the process of establishing a connection"
+    echo -e "  ${CYAN}Max Clients${NC}   Your configured limit for simultaneous connections"
     echo ""
     echo -e "${BOLD}Resource Usage:${NC}"
     echo ""
-    echo "  ${GREEN}CPU%${NC}         How much processor your Conduit is using"
-    echo "  ${GREEN}Memory${NC}       RAM consumed by the Docker container"
-    echo "  ${GREEN}Network I/O${NC}  Data transferred (received / sent)"
+    echo -e "  ${GREEN}CPU%${NC}         How much processor your Conduit is using"
+    echo -e "  ${GREEN}Memory${NC}       RAM consumed by the Docker container"
+    echo -e "  ${GREEN}Network I/O${NC}  Data transferred (received / sent)"
     echo ""
     echo -e "${BOLD}What's Normal?${NC}"
     echo ""
@@ -2405,7 +2336,7 @@ show_info_stats() {
     echo -e "${BOLD}[STATS] Log Format:${NC}"
     echo ""
     echo "  The container logs show entries like:"
-    echo "  ${DIM}[STATS] Connected: 15, Connecting: 3, Max: 200${NC}"
+    echo -e "  ${DIM}[STATS] Connected: 15, Connecting: 3, Max: 200${NC}"
     echo ""
     echo "  These update every few seconds when peers are active."
     echo ""
@@ -2413,8 +2344,8 @@ show_info_stats() {
     read -n 1 -s -r -p "Press any key to return..."
 }
 
-# show_info_security: Explain security and privacy
-show_info_security() {
+# show_info_privacy: Explain security and privacy
+show_info_privacy() {
     print_header
     echo -e "${CYAN}═══ SECURITY & PRIVACY ═══${NC}"
     echo ""
@@ -2431,11 +2362,11 @@ show_info_security() {
     echo -e "${BOLD}Container Isolation:${NC}"
     echo "  Your Conduit runs in a hardened Docker container with:"
     echo ""
-    echo "  ${GREEN}✔${NC} Read-only filesystem (can't modify your Mac)"
-    echo "  ${GREEN}✔${NC} Dropped privileges (minimal permissions)"
-    echo "  ${GREEN}✔${NC} Isolated network (can't access local services)"
-    echo "  ${GREEN}✔${NC} Resource limits (CPU/RAM caps)"
-    echo "  ${GREEN}✔${NC} No access to your files or documents"
+    echo -e "  ${GREEN}✔${NC} Read-only filesystem (can't modify your Mac)"
+    echo -e "  ${GREEN}✔${NC} Dropped privileges (minimal permissions)"
+    echo -e "  ${GREEN}✔${NC} Isolated network (can't access local services)"
+    echo -e "  ${GREEN}✔${NC} Resource limits (CPU/RAM caps)"
+    echo -e "  ${GREEN}✔${NC} No access to your files or documents"
     echo ""
     echo -e "${BOLD}Your IP Address:${NC}"
     echo "  • Psiphon users see the Psiphon network, not your IP"
@@ -2446,6 +2377,77 @@ show_info_security() {
     echo "  • Running a proxy is legal in most countries"
     echo "  • You are not responsible for users' actions"
     echo "  • Check your local laws if you have concerns"
+    echo ""
+    echo "══════════════════════════════════════════════════════"
+    read -n 1 -s -r -p "Press any key to return..."
+}
+
+# show_info_security_config: Display detailed security configuration (moved from option 8)
+show_info_security_config() {
+    print_header
+    echo -e "${CYAN}═══ SECURITY CONFIGURATION ═══${NC}"
+    echo ""
+    echo -e "${BOLD}Image Verification:${NC}"
+    echo "  Docker images are verified using SHA256 digest."
+    echo -e "  Expected: ${DIM}${IMAGE_DIGEST:0:20}...${NC}"
+    echo ""
+    echo -e "${BOLD}Network Isolation:${NC}"
+    echo "  The container runs on an isolated bridge network."
+    echo "  It CANNOT access the host network stack directly."
+    echo "  It CAN reach the internet (required for proxy function)."
+    echo ""
+    echo -e "${BOLD}Filesystem Protection:${NC}"
+    echo "  Container filesystem is READ-ONLY."
+    echo "  Only /tmp is writable (in-memory tmpfs)."
+    echo "  Data volume is mounted for persistent state."
+    echo ""
+    echo -e "${BOLD}Privilege Restrictions:${NC}"
+    echo "  ALL Linux capabilities are dropped except NET_BIND_SERVICE."
+    echo "  no-new-privileges security option is enabled."
+    echo "  Container cannot escalate to root."
+    echo ""
+    # Get current max-clients from container to calculate PIDs limit
+    local current_max_clients=""
+    local pids_display="(dynamic: max-clients + 50)"
+    if container_exists; then
+        local container_args=""
+        container_args=$(docker inspect --format='{{.Args}}' "$CONTAINER_NAME" 2>/dev/null) || container_args=""
+        current_max_clients=$(echo "$container_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || current_max_clients=""
+        if [ -n "$current_max_clients" ]; then
+            local current_pids=$((current_max_clients + 50))
+            pids_display="${current_pids} maximum (max-clients + 50)"
+        fi
+    fi
+    echo -e "${BOLD}Resource Limits:${NC}"
+    echo "  Memory:     $MAX_MEMORY maximum"
+    echo "  CPU:        $MAX_CPUS cores maximum"
+    echo "  Processes:  $pids_display"
+    echo ""
+    echo "══════════════════════════════════════════════════════"
+    read -n 1 -s -r -p "Press any key to return..."
+}
+
+# show_info_file_locations: Display file and data locations (moved from option 8)
+show_info_file_locations() {
+    print_header
+    echo -e "${CYAN}═══ FILE & DATA LOCATIONS ═══${NC}"
+    echo ""
+    echo -e "${BOLD}Application Files:${NC}"
+    echo "  Script:         ${HOME}/conduit-manager/conduit-mac.sh"
+    echo "  Menu Bar App:   ${HOME}/conduit-manager/Conduit-Mac.app"
+    echo "  Symlink:        /usr/local/bin/conduit (if installed)"
+    echo ""
+    echo -e "${BOLD}Configuration & Logs:${NC}"
+    echo "  Config File:    $CONFIG_FILE"
+    echo "  Log File:       $LOG_FILE"
+    echo "  Seccomp Profile: $SECCOMP_FILE"
+    echo "  Backups:        $BACKUP_DIR/"
+    echo ""
+    echo -e "${BOLD}Docker Resources:${NC}"
+    echo "  Container:      $CONTAINER_NAME"
+    echo "  Data Volume:    $VOLUME_NAME"
+    echo "  Network:        $NETWORK_NAME"
+    echo "  Image:          $IMAGE"
     echo ""
     echo "══════════════════════════════════════════════════════"
     read -n 1 -s -r -p "Press any key to return..."
@@ -2468,16 +2470,16 @@ show_info_about() {
     echo ""
     echo -e "${BOLD}Useful Links:${NC}"
     echo ""
-    echo "  Psiphon Website:     ${CYAN}https://psiphon.ca${NC}"
-    echo "  Conduit GitHub:      ${CYAN}https://github.com/Psiphon-Inc/conduit${NC}"
-    echo "  This Manager:        ${CYAN}https://github.com/${GITHUB_REPO}${NC}"
-    echo "  Ryve Rewards App:    ${CYAN}https://network.ryve.app${NC}"
+    echo -e "  Psiphon Website:     ${CYAN}https://psiphon.ca${NC}"
+    echo -e "  Conduit GitHub:      ${CYAN}https://github.com/Psiphon-Inc/conduit${NC}"
+    echo -e "  This Manager:        ${CYAN}https://github.com/${GITHUB_REPO}${NC}"
+    echo -e "  Ryve Rewards App:    ${CYAN}https://network.ryve.app${NC}"
     echo ""
     echo -e "${BOLD}Conduit Manager v${VERSION}${NC}"
     echo "  Security-hardened macOS edition"
     echo ""
     echo -e "${BOLD}Docker Image:${NC}"
-    echo "  ${DIM}${IMAGE}${NC}"
+    echo -e "  ${DIM}${IMAGE}${NC}"
     echo ""
     echo "══════════════════════════════════════════════════════"
     read -n 1 -s -r -p "Press any key to return..."
@@ -2492,7 +2494,9 @@ show_info_menu() {
         echo "  1. 🔌 How Conduit Works"
         echo "  2. 📊 Understanding the Stats"
         echo "  3. 🔒 Security & Privacy"
-        echo "  4. 🚀 About Psiphon Conduit"
+        echo "  4. 🛡️  Security Configuration"
+        echo "  5. 📁 File & Data Locations"
+        echo "  6. 🚀 About Psiphon Conduit"
         echo ""
         echo "  0. ← Back to Main Menu"
         echo ""
@@ -2501,8 +2505,10 @@ show_info_menu() {
         case "$info_choice" in
             1) show_info_how_it_works ;;
             2) show_info_stats ;;
-            3) show_info_security ;;
-            4) show_info_about ;;
+            3) show_info_privacy ;;
+            4) show_info_security_config ;;
+            5) show_info_file_locations ;;
+            6) show_info_about ;;
             0|"") return ;;
             *)
                 echo -e "${RED}Invalid option.${NC}"
@@ -2548,8 +2554,7 @@ while true; do
     echo -e " ${BOLD}Configuration${NC}"
     echo "   6. 🛠️  Reconfigure (Re-install)"
     echo "   7. 📈 Resource Limits (CPU/RAM)"
-    echo "   8. 🔒 Security Settings"
-    echo "   9. 🆔 Node Identity"
+    echo "   8. 🆔 Node Identity"
     echo "   c. 🎁 Claim Rewards"
     echo ""
     echo -e " ${BOLD}Backup & Maintenance${NC}"
@@ -2588,8 +2593,7 @@ while true; do
             fi
             ;;
         7) configure_resources ;;
-        8) show_security_info ;;
-        9) show_node_info ;;
+        8) show_node_info ;;
         [cC]) generate_claim_link ;;
         [bB]) backup_key ;;
         [rR]) restore_key ;;
