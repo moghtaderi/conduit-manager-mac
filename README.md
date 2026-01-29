@@ -109,13 +109,14 @@ System Settings → General → Login Items → Add `Conduit-Mac.app`
    1. ▶️  Start / Restart
    2. ⏹️  Stop Service
    3. 📊 Live Dashboard
-   4. 📜 View Logs
-   5. 🩺 Health Check
+   4. 🌍 Live Peers by Country
+   5. 📜 View Logs
+   6. 🩺 Health Check
 
  Configuration
-   6. 🛠️  Reconfigure
-   7. 📈 Resource Limits
-   8. 🆔 Node Identity
+   7. 🛠️  Reconfigure
+   8. 📈 Resource Limits
+   9. 🆔 Node Identity
    c. 🎁 Claim Rewards
 
  Backup & Maintenance
