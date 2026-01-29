@@ -763,12 +763,13 @@ class ConduitManager {
     }
 
     var config: (maxClients: String, bandwidth: String)? {
-        // Aggregate max clients from all containers
+        // Aggregate max clients and bandwidth from all containers
         let configured = configuredContainers
         guard !configured.isEmpty else { return nil }
 
         var totalMaxClients = 0
-        var bandwidth: String = "-"
+        var totalBandwidth = 0
+        var hasUnlimited = false
 
         for i in configured {
             let args = run("docker", "inspect", "--format", "{{.Args}}", containerName(at: i))
@@ -777,14 +778,24 @@ class ConduitManager {
                 totalMaxClients += maxClients
             }
 
-            // Use first container's bandwidth for display
-            if i == configured.first {
-                let bw = extractInt(from: args, after: "--bandwidth ")
-                bandwidth = bw == -1 ? "Unlimited" : bw > 0 ? "\(bw) Mbps" : "-"
+            let bw = extractInt(from: args, after: "--bandwidth ")
+            if bw == -1 {
+                hasUnlimited = true
+            } else if bw > 0 {
+                totalBandwidth += bw
             }
         }
 
-        return (totalMaxClients > 0 ? "\(totalMaxClients)" : "-", bandwidth)
+        let bandwidthStr: String
+        if hasUnlimited {
+            bandwidthStr = "Unlimited"
+        } else if totalBandwidth > 0 {
+            bandwidthStr = "\(totalBandwidth) Mbps"
+        } else {
+            bandwidthStr = "-"
+        }
+
+        return (totalMaxClients > 0 ? "\(totalMaxClients)" : "-", bandwidthStr)
     }
 
     // MARK: Helpers
