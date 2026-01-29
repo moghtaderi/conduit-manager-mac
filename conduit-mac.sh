@@ -1741,20 +1741,23 @@ view_dashboard() {
                 down=$(echo "$log_line" | sed -n 's/.*Down:[[:space:]]*\([^|]*\).*/\1/p' | tr -d ' ') || down="0B"
             fi
 
-            # Get cumulative bandwidth setting from all containers
+            # Get cumulative bandwidth setting from RUNNING containers only
             local total_bandwidth=0
             local has_unlimited=false
             local container_bandwidth=""
             local bw_i=1
             while [ $bw_i -le "$CONTAINER_COUNT" ]; do
-                local bw_name bw_args bw_val
-                bw_name=$(get_container_name "$bw_i")
-                bw_args=$(docker inspect --format='{{.Args}}' "$bw_name" 2>/dev/null) || bw_args=""
-                bw_val=$(echo "$bw_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || bw_val=""
-                if [ "$bw_val" = "-1" ]; then
-                    has_unlimited=true
-                elif [ -n "$bw_val" ] && [ "$bw_val" -gt 0 ] 2>/dev/null; then
-                    total_bandwidth=$((total_bandwidth + bw_val))
+                # Only count running containers
+                if container_running "$bw_i"; then
+                    local bw_name bw_args bw_val
+                    bw_name=$(get_container_name "$bw_i")
+                    bw_args=$(docker inspect --format='{{.Args}}' "$bw_name" 2>/dev/null) || bw_args=""
+                    bw_val=$(echo "$bw_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || bw_val=""
+                    if [ "$bw_val" = "-1" ]; then
+                        has_unlimited=true
+                    elif [ -n "$bw_val" ] && [ "$bw_val" -gt 0 ] 2>/dev/null; then
+                        total_bandwidth=$((total_bandwidth + bw_val))
+                    fi
                 fi
                 bw_i=$((bw_i + 1))
             done

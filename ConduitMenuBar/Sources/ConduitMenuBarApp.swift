@@ -836,15 +836,15 @@ class ConduitManager {
     }
 
     var config: (maxClients: String, bandwidth: String)? {
-        // Aggregate max clients and bandwidth from all containers
-        let configured = configuredContainers
-        guard !configured.isEmpty else { return nil }
+        // Aggregate max clients and bandwidth from RUNNING containers only
+        let running = runningContainers
+        guard !running.isEmpty else { return nil }
 
         var totalMaxClients = 0
         var totalBandwidth = 0
         var hasUnlimited = false
 
-        for i in configured {
+        for i in running {
             let args = run("docker", "inspect", "--format", "{{.Args}}", containerName(at: i))
             let maxClients = extractInt(from: args, after: "--max-clients ")
             if maxClients > 0 {
