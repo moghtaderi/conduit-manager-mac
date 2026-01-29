@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="2.0.3"                                          # Script version
+readonly VERSION="2.0.4"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -1598,20 +1598,21 @@ view_dashboard() {
                     docker_stats=$(docker stats --no-stream --format "{{.CPUPerc}}|{{.MemUsage}}" "$name" 2>/dev/null) || docker_stats=""
 
                     if [ -n "$docker_stats" ]; then
-                        local cpu_val mem_val
-                        cpu_val=$(echo "$docker_stats" | cut -d'|' -f1 | tr -d '%')
+                        local cpu_val mem_val mem_num
+                        cpu_val=$(echo "$docker_stats" | cut -d'|' -f1 | tr -d '% ')
                         mem_val=$(echo "$docker_stats" | cut -d'|' -f2 | cut -d'/' -f1)
-                        # Parse memory value
-                        if echo "$mem_val" | grep -q "GiB"; then
-                            local mem_num
-                            mem_num=$(echo "$mem_val" | tr -d 'GiB ')
-                            combined_mem_mb=$(awk "BEGIN {printf \"%.0f\", $combined_mem_mb + ($mem_num * 1024)}")
-                        elif echo "$mem_val" | grep -q "MiB"; then
-                            local mem_num
-                            mem_num=$(echo "$mem_val" | tr -d 'MiB ')
-                            combined_mem_mb=$(awk "BEGIN {printf \"%.0f\", $combined_mem_mb + $mem_num}")
+                        # Parse memory value - extract numeric part using sed
+                        mem_num=$(echo "$mem_val" | sed 's/[^0-9.]//g')
+                        if [ -n "$mem_num" ]; then
+                            if echo "$mem_val" | grep -qiE "GiB|GB"; then
+                                combined_mem_mb=$(awk "BEGIN {printf \"%.0f\", ${combined_mem_mb:-0} + (${mem_num:-0} * 1024)}")
+                            elif echo "$mem_val" | grep -qiE "MiB|MB"; then
+                                combined_mem_mb=$(awk "BEGIN {printf \"%.0f\", ${combined_mem_mb:-0} + ${mem_num:-0}}")
+                            elif echo "$mem_val" | grep -qiE "KiB|KB"; then
+                                combined_mem_mb=$(awk "BEGIN {printf \"%.0f\", ${combined_mem_mb:-0} + (${mem_num:-0} / 1024)}")
+                            fi
                         fi
-                        combined_cpu=$(awk "BEGIN {printf \"%.2f\", $(echo $combined_cpu | tr -d '%') + $cpu_val}")
+                        combined_cpu=$(awk "BEGIN {printf \"%.2f\", ${combined_cpu:-0} + ${cpu_val:-0}}")
                     fi
 
                     # Get connection stats from logs
@@ -2029,7 +2030,8 @@ health_check_single() {
     echo -n "  Container uptime:     "
     if container_running "$idx"; then
         local status_str=""
-        status_str=$(docker ps --format '{{.Status}}' --filter "name=^${name}$" 2>/dev/null | head -1) || status_str=""
+        # Use grep for exact name match since docker filter does substring matching
+        status_str=$(docker ps --format '{{.Names}}|{{.Status}}' 2>/dev/null | grep "^${name}|" | cut -d'|' -f2 | head -1) || status_str=""
         if [ -n "$status_str" ]; then
             local uptime_part=""
             uptime_part=$(echo "$status_str" | sed 's/Up //' | sed 's/ (.*)//')
@@ -2750,7 +2752,9 @@ generate_claim_link() {
         echo -e "Default: ${GREEN}My Conduit Node${NC}"
         echo ""
         read -p "Node Name: " input_name < /dev/tty
-        local base_name="${input_name:-My Conduit Node}"
+        # Sanitize input: remove quotes and backslashes to prevent JSON injection, limit length
+        local base_name
+        base_name=$(echo "${input_name:-My Conduit Node}" | tr -d '"\\' | head -c 50)
 
         # Save for future use
         SAVED_NODE_NAME="$base_name"
@@ -2818,7 +2822,8 @@ generate_claim_all() {
         echo -e "Default: ${GREEN}My Conduit Node${NC}"
         echo ""
         read -p "Node Name: " input_name < /dev/tty
-        base_name="${input_name:-My Conduit Node}"
+        # Sanitize input: remove quotes and backslashes to prevent JSON injection, limit length
+        base_name=$(echo "${input_name:-My Conduit Node}" | tr -d '"\\' | head -c 50)
 
         # Save for future use
         SAVED_NODE_NAME="$base_name"
@@ -3518,9 +3523,9 @@ show_container_manager() {
                         clients="${conn:-0}/${max_cl:-200}"
                     fi
 
-                    # Get uptime
+                    # Get uptime - use grep for exact name match since docker filter does substring matching
                     local status_str
-                    status_str=$(docker ps --format '{{.Status}}' --filter "name=^${name}$" 2>/dev/null | head -1) || status_str=""
+                    status_str=$(docker ps --format '{{.Names}}|{{.Status}}' 2>/dev/null | grep "^${name}|" | cut -d'|' -f2 | head -1) || status_str=""
                     if [ -n "$status_str" ]; then
                         uptime=$(echo "$status_str" | sed 's/Up //' | sed 's/ (.*)//' | sed 's/ seconds\?/s/' | sed 's/ minutes\?/m/' | sed 's/ hours\?/h/' | sed 's/ days\?/d/')
                     fi

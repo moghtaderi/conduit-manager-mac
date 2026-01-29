@@ -36,10 +36,11 @@ enum TerminalApp: String, CaseIterable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "2.0.3"
+    private let version = "2.0.4"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
+    private var isUpdating = false  // Prevent concurrent updates
 
     private var preferredTerminal: TerminalApp {
         get {
@@ -181,6 +182,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Status Updates
 
     private func updateStatus() {
+        // Prevent concurrent updates if previous one is still running
+        guard !isUpdating else { return }
+        isUpdating = true
+        defer { isUpdating = false }
+
         guard let manager = manager, let menu = statusItem?.menu else { return }
 
         let docker = manager.dockerStatus
