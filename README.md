@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 | Step | Press | What it does |
 |:----:|:-----:|--------------|
 | 1 | `7` | Set your CPU & RAM limits |
-| 2 | `6` | Install the Conduit service |
+| 2 | `6` | Reconfigure/Install the Conduit service |
 | 3 | `m` | Open the Menu Bar App |
 
 **Done!** Your node is now helping people access the free internet.
@@ -109,14 +109,13 @@ System Settings → General → Login Items → Add `Conduit-Mac.app`
    1. ▶️  Start / Restart
    2. ⏹️  Stop Service
    3. 📊 Live Dashboard
-   4. 🌍 Live Peers by Country
-   5. 📜 View Logs
-   6. 🩺 Health Check
+   4. 📜 View Logs
+   5. 🩺 Health Check
 
  Configuration
-   7. 🛠️  Reconfigure
-   8. 📈 Resource Limits
-   9. 🆔 Node Identity
+   6. 🛠️  Reconfigure
+   7. 📈 Resource Limits
+   8. 🆔 Node Identity
    c. 🎁 Claim Rewards
 
  Backup & Maintenance

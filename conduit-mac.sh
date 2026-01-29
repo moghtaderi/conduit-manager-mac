@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.10.0"                                         # Script version
+readonly VERSION="1.9.1"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -48,7 +48,6 @@ readonly BACKUP_DIR="${HOME}/.conduit-backups"                    # Backup direc
 readonly CONFIG_FILE="${HOME}/.conduit-config"                    # User configuration file
 readonly SECCOMP_FILE="${HOME}/.conduit-seccomp.json"             # Seccomp security profile
 readonly GITHUB_REPO="moghtaderi/conduit-manager-mac"                # GitHub repository for updates
-readonly GEOIP_CACHE="${HOME}/.conduit-geoip-cache"                  # GeoIP lookup cache file
 
 # ------------------------------------------------------------------------------
 # RESOURCE LIMITS - Default values (can be overridden by user config)
@@ -2274,255 +2273,6 @@ generate_claim_link() {
 }
 
 # ==============================================================================
-# LIVE PEERS BY COUNTRY
-# ==============================================================================
-
-# geo_lookup: Look up country for an IP address using ip-api.com
-# Uses local cache to avoid excessive API calls (rate limit: 45/min)
-# Usage: geo_lookup "1.2.3.4" -> "Iran"
-geo_lookup() {
-    local ip="$1"
-
-    # Skip private/local IPs
-    if [[ "$ip" =~ ^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.) ]]; then
-        echo "Private"
-        return
-    fi
-
-    # Check cache first
-    if [ -f "$GEOIP_CACHE" ]; then
-        local cached=""
-        cached=$(grep "^${ip}|" "$GEOIP_CACHE" 2>/dev/null | head -1 | cut -d'|' -f2)
-        if [ -n "$cached" ]; then
-            echo "$cached"
-            return
-        fi
-    fi
-
-    # Query ip-api.com (free, no API key needed, 45 requests/minute limit)
-    local country=""
-    country=$(curl -s --max-time 2 "http://ip-api.com/line/${ip}?fields=country" 2>/dev/null)
-
-    # Validate response (should be a country name, not error)
-    if [ -z "$country" ] || [ "$country" = "fail" ] || [[ "$country" =~ ^[0-9] ]]; then
-        country="Unknown"
-    fi
-
-    # Cache the result (limit cache to 5000 entries)
-    if [ -f "$GEOIP_CACHE" ]; then
-        local cache_lines=""
-        cache_lines=$(wc -l < "$GEOIP_CACHE" 2>/dev/null | tr -d ' ')
-        if [ "${cache_lines:-0}" -gt 5000 ]; then
-            tail -2500 "$GEOIP_CACHE" > "${GEOIP_CACHE}.tmp" && mv "${GEOIP_CACHE}.tmp" "$GEOIP_CACHE"
-        fi
-    fi
-    echo "${ip}|${country}" >> "$GEOIP_CACHE"
-
-    echo "$country"
-}
-
-# extract_peer_ips: Extract unique peer IPs from Docker logs
-# Returns list of IPs that have connected to this node
-extract_peer_ips() {
-    local logs=""
-    logs=$(docker logs --tail 500 "$CONTAINER_NAME" 2>&1)
-
-    # Look for IP addresses in connection patterns
-    # Common patterns: "from X.X.X.X", "peer X.X.X.X", "client X.X.X.X", IP:port
-    echo "$logs" | grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' | \
-        grep -vE '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|255\.)' | \
-        sort -u
-}
-
-# format_bytes: Format bytes into human-readable format
-# Usage: format_bytes 1234567 -> "1.2MB"
-format_bytes() {
-    local bytes="${1:-0}"
-    if [ "$bytes" -ge 1073741824 ]; then
-        awk "BEGIN {printf \"%.1fGB\", $bytes/1073741824}"
-    elif [ "$bytes" -ge 1048576 ]; then
-        awk "BEGIN {printf \"%.1fMB\", $bytes/1048576}"
-    elif [ "$bytes" -ge 1024 ]; then
-        awk "BEGIN {printf \"%.1fKB\", $bytes/1024}"
-    else
-        echo "${bytes}B"
-    fi
-}
-
-# show_peers: Display live peer traffic by country
-# Real-time updating display with GeoIP resolution
-# Compatible with Bash 3.2 (macOS default) - uses temp files instead of associative arrays
-show_peers() {
-    # Check if container is running first
-    if ! container_running; then
-        print_header
-        echo -e "${YELLOW}Container is not running.${NC}"
-        echo ""
-        echo "Start the container first (option 1) to see peer data."
-        echo ""
-        read -n 1 -s -r -p "Press any key to return..."
-        return 0
-    fi
-
-    # Temp file for country counts (Bash 3.2 compatible - no associative arrays)
-    local country_data_file="${TMPDIR:-/tmp}/conduit_country_data.$$"
-    local refresh_interval=10
-    local last_refresh=0
-    local stop_peers=0
-
-    # Hide cursor and save screen
-    tput smcup 2>/dev/null || true
-    echo -ne "\033[?25l"
-
-    while [ "$stop_peers" -eq 0 ]; do
-        local now
-        now=$(date +%s)
-        local time_since=$((now - last_refresh))
-        local time_left=$((refresh_interval - time_since))
-        if [ "$time_left" -lt 0 ]; then
-            time_left=0
-        fi
-
-        # Refresh data every interval
-        if [ "$time_since" -ge "$refresh_interval" ] || [ "$last_refresh" -eq 0 ]; then
-            last_refresh=$now
-
-            # Clear temp file
-            : > "$country_data_file"
-
-            # Get peer IPs and resolve countries
-            local ips=""
-            ips=$(extract_peer_ips) || ips=""
-            local total_ips=0
-            local resolved_count=0
-            local country_count=0
-
-            # Process IPs and write to temp file
-            if [ -n "$ips" ]; then
-                echo "$ips" | while IFS= read -r ip; do
-                    [ -z "$ip" ] && continue
-                    total_ips=$((total_ips + 1))
-
-                    # Limit API calls
-                    if [ "$resolved_count" -lt 40 ]; then
-                        local country=""
-                        country=$(geo_lookup "$ip") || country="Unknown"
-                        [ -z "$country" ] && country="Unknown"
-
-                        # Write country to temp file
-                        echo "${country}" >> "$country_data_file"
-                        resolved_count=$((resolved_count + 1))
-                    fi
-                done
-                # Count total IPs outside subshell
-                total_ips=$(echo "$ips" | wc -l | tr -d ' ')
-            fi
-
-            # Get container stats
-            local stats_line=""
-            stats_line=$(docker logs --tail 20 "$CONTAINER_NAME" 2>&1 | grep "\[STATS\]" | tail -1) || stats_line=""
-            local connected=""
-            local connecting=""
-            connected=$(echo "$stats_line" | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p') || connected=""
-            connecting=$(echo "$stats_line" | sed -n 's/.*Connecting:[[:space:]]*\([0-9]*\).*/\1/p') || connecting=""
-            connected=${connected:-0}
-            connecting=${connecting:-0}
-
-            # Get network I/O from docker stats
-            local net_io=""
-            net_io=$(docker stats --no-stream --format "{{.NetIO}}" "$CONTAINER_NAME" 2>/dev/null) || net_io="N/A"
-
-            # Count unique countries
-            if [ -f "$country_data_file" ] && [ -s "$country_data_file" ]; then
-                country_count=$(sort -u "$country_data_file" 2>/dev/null | wc -l | tr -d ' ') || country_count=0
-            fi
-
-            # Clear screen and draw
-            printf "\033[2J\033[H"
-
-            echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════╗${NC}"
-            echo -e "${CYAN}║${NC}  ${BOLD}LIVE PEER TRAFFIC BY COUNTRY${NC}                   ${DIM}[q] Back  [r] Refresh${NC}"
-            echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════╣${NC}"
-            printf "${CYAN}║${NC}  Connected: ${GREEN}%-5s${NC}  Connecting: ${YELLOW}%-5s${NC}  Network I/O: ${CYAN}%-15s${NC}${CYAN}║${NC}\n" "$connected" "$connecting" "${net_io:-N/A}"
-            echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════╝${NC}"
-            echo ""
-
-            if [ -s "$country_data_file" ]; then
-                echo -e "${GREEN}${BOLD} 🌍 PEERS BY COUNTRY ${NC}${DIM}(from recent connections)${NC}"
-                echo ""
-                printf " ${BOLD}%-30s %10s${NC}\n" "Country" "IPs"
-                echo " ────────────────────────────────────────"
-
-                # Count and sort countries
-                sort "$country_data_file" 2>/dev/null | uniq -c | sort -rn | head -15 | while read -r cnt ctry; do
-                    [ -z "$ctry" ] && continue
-                    # Create simple bar
-                    local bar=""
-                    local bar_len="$cnt"
-                    if [ "$bar_len" -gt 20 ]; then
-                        bar_len=20
-                    fi
-                    local j=0
-                    while [ "$j" -lt "$bar_len" ]; do
-                        bar="${bar}█"
-                        j=$((j + 1))
-                    done
-
-                    printf " ${GREEN}%-30s${NC} %5s  ${CYAN}%s${NC}\n" "$ctry" "$cnt" "$bar"
-                done
-            else
-                echo ""
-                echo -e " ${DIM}No peer IP data found in recent logs.${NC}"
-                echo -e " ${DIM}Peers may be connected but IPs not logged.${NC}"
-            fi
-
-            echo ""
-            echo -e " ${DIM}Total unique IPs found: ${total_ips:-0}${NC}"
-            echo -e " ${DIM}Countries resolved: ${country_count:-0}${NC}"
-            echo -e " ${DIM}GeoIP cache: ${GEOIP_CACHE}${NC}"
-        fi
-
-        # Progress indicator
-        local prog_bar=""
-        local elapsed=$((now - last_refresh))
-        local k=0
-        while [ "$k" -lt "$refresh_interval" ]; do
-            if [ "$k" -lt "$elapsed" ]; then
-                prog_bar="${prog_bar}●"
-            else
-                prog_bar="${prog_bar}○"
-            fi
-            k=$((k + 1))
-        done
-
-        # Position at bottom
-        local term_height
-        term_height=$(tput lines 2>/dev/null) || term_height=24
-        printf "\033[${term_height};1H"
-        printf "\033[K[${YELLOW}${prog_bar}${NC}] Next refresh in %2ds  ${DIM}[q] Back [r] Refresh${NC}" "$time_left"
-
-        # Check for keypress (with fallback)
-        local key=""
-        if read -t 1 -n 1 -s key 2>/dev/null; then
-            case "$key" in
-                q|Q) stop_peers=1 ;;
-                r|R) last_refresh=0 ;;  # Force refresh
-            esac
-        else
-            # read failed or timed out, sleep instead
-            sleep 1 2>/dev/null || true
-        fi
-    done
-
-    # Cleanup
-    rm -f "$country_data_file" 2>/dev/null || true
-
-    # Show cursor and restore screen
-    echo -ne "\033[?25h"
-    tput rmcup 2>/dev/null || true
-}
-
-# ==============================================================================
 # INFO & HELP HUB
 # ==============================================================================
 
@@ -2692,8 +2442,7 @@ show_info_file_locations() {
     echo "  Config File:    $CONFIG_FILE"
     echo "  Log File:       $LOG_FILE"
     echo "  Seccomp Profile: $SECCOMP_FILE"
-    echo "  GeoIP Cache:    $GEOIP_CACHE"
-    echo "  Backups:        $BACKUP_DIR/"
+      echo "  Backups:        $BACKUP_DIR/"
     echo ""
     echo -e "${BOLD}Docker Resources:${NC}"
     echo "  Container:      $CONTAINER_NAME"
@@ -2800,14 +2549,13 @@ while true; do
     echo "   1. ▶️  Start / Restart (Smart)"
     echo "   2. ⏹️  Stop Service"
     echo "   3. 📊 Live Dashboard"
-    echo "   4. 🌍 Live Peers by Country"
-    echo "   5. 📜 View Logs"
-    echo "   6. 🩺 Health Check"
+    echo "   4. 📜 View Logs"
+    echo "   5. 🩺 Health Check"
     echo ""
     echo -e " ${BOLD}Configuration${NC}"
-    echo "   7. 🛠️  Reconfigure (Re-install)"
-    echo "   8. 📈 Resource Limits (CPU/RAM)"
-    echo "   9. 🆔 Node Identity"
+    echo "   6. 🛠️  Reconfigure (Re-install)"
+    echo "   7. 📈 Resource Limits (CPU/RAM)"
+    echo "   8. 🆔 Node Identity"
     echo "   c. 🎁 Claim Rewards"
     echo ""
     echo -e " ${BOLD}Backup & Maintenance${NC}"
@@ -2828,10 +2576,9 @@ while true; do
         1) smart_start ;;
         2) stop_service ;;
         3) view_dashboard ;;
-        4) show_peers ;;
-        5) view_logs ;;
-        6) health_check ;;
-        7)
+        4) view_logs ;;
+        5) health_check ;;
+        6)
             print_header
             echo -e "${YELLOW}═══ RECONFIGURE CONDUIT ═══${NC}"
             echo ""
@@ -2846,8 +2593,8 @@ while true; do
                 sleep 1
             fi
             ;;
-        8) configure_resources ;;
-        9) show_node_info ;;
+        7) configure_resources ;;
+        8) show_node_info ;;
         [cC]) generate_claim_link ;;
         [bB]) backup_key ;;
         [rR]) restore_key ;;
