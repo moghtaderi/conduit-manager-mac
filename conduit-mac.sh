@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.7.0"                                          # Script version
+readonly VERSION="1.8.0"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -1666,6 +1666,7 @@ show_node_info() {
 
 # health_check: Comprehensive health check for Conduit container
 # Checks Docker, container status, network, resources, and connectivity
+# Enhanced with peer counts and uptime display
 health_check() {
     print_header
     echo -e "${CYAN}═══ CONDUIT HEALTH CHECK ═══${NC}"
@@ -1719,7 +1720,40 @@ health_check() {
         echo -e "${YELLOW}N/A${NC}"
     fi
 
-    # 5. Check network isolation
+    # 5. Check container uptime
+    echo -n "  Container uptime:     "
+    if container_running; then
+        local started_at=""
+        started_at=$(docker inspect --format='{{.State.StartedAt}}' "$CONTAINER_NAME" 2>/dev/null) || started_at=""
+        if [ -n "$started_at" ]; then
+            # Parse ISO timestamp and calculate duration
+            local start_epoch=""
+            # macOS date command syntax
+            start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${started_at%%.*}" "+%s" 2>/dev/null) || start_epoch=""
+            if [ -n "$start_epoch" ]; then
+                local now_epoch=$(date "+%s")
+                local diff=$((now_epoch - start_epoch))
+                local days=$((diff / 86400))
+                local hours=$(((diff % 86400) / 3600))
+                local mins=$(((diff % 3600) / 60))
+                if [ "$days" -gt 0 ]; then
+                    echo -e "${GREEN}${days}d ${hours}h ${mins}m${NC}"
+                elif [ "$hours" -gt 0 ]; then
+                    echo -e "${GREEN}${hours}h ${mins}m${NC}"
+                else
+                    echo -e "${GREEN}${mins}m${NC}"
+                fi
+            else
+                echo -e "${GREEN}Running${NC}"
+            fi
+        else
+            echo -e "${GREEN}Running${NC}"
+        fi
+    else
+        echo -e "${YELLOW}N/A${NC} - Container not running"
+    fi
+
+    # 6. Check network isolation
     echo -n "  Network isolation:    "
     local network_mode=""
     network_mode=$(docker inspect --format='{{.HostConfig.NetworkMode}}' "$CONTAINER_NAME" 2>/dev/null) || network_mode=""
@@ -1732,7 +1766,7 @@ health_check() {
         echo -e "${GREEN}OK${NC} (${network_mode:-unknown})"
     fi
 
-    # 6. Check security options
+    # 7. Check security options
     echo -n "  Security hardening:   "
     local read_only=""
     local no_new_privs=""
@@ -1746,28 +1780,50 @@ health_check() {
         warnings=$((warnings + 1))
     fi
 
-    # 7 & 8. Check Psiphon connection and stats (done together since stats implies connection)
-    local stats_count=""
+    # 8. Check Psiphon connection with peer counts
+    # Fetch logs once and extract all needed info
+    local hc_logs=""
+    local hc_stats_lines=""
+    local hc_last_stat=""
+    local hc_connected=0
+    local hc_connecting=0
+    local stats_count=0
+
     if container_running; then
-        stats_count=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[STATS\]" 2>/dev/null | head -1 || echo "0")
+        hc_logs=$(docker logs --tail 100 "$CONTAINER_NAME" 2>&1)
+        hc_stats_lines=$(echo "$hc_logs" | grep "\[STATS\]" || true)
+        if [ -n "$hc_stats_lines" ]; then
+            stats_count=$(echo "$hc_stats_lines" | wc -l | tr -d ' ')
+            hc_last_stat=$(echo "$hc_stats_lines" | tail -1)
+            # Parse: Connected: X, Connecting: Y
+            hc_connected=$(echo "$hc_last_stat" | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p' | head -1 | tr -d '\n')
+            hc_connecting=$(echo "$hc_last_stat" | sed -n 's/.*Connecting:[[:space:]]*\([0-9]*\).*/\1/p' | head -1 | tr -d '\n')
+        fi
+        hc_connected=${hc_connected:-0}
+        hc_connecting=${hc_connecting:-0}
         stats_count=${stats_count:-0}
     fi
 
-    echo -n "  Psiphon connection:   "
+    echo -n "  Network connection:   "
     if container_running; then
-        # If we have stats, we're definitely connected (stats only log when connected)
-        if [ "$stats_count" -gt 0 ] 2>/dev/null; then
-            echo -e "${GREEN}OK${NC} (Connected to Psiphon network)"
+        if [ "$hc_connected" -gt 0 ] 2>/dev/null; then
+            echo -e "${GREEN}OK${NC} (${hc_connected} peers connected, ${hc_connecting} connecting)"
+        elif [ "$stats_count" -gt 0 ] 2>/dev/null; then
+            if [ "$hc_connecting" -gt 0 ] 2>/dev/null; then
+                echo -e "${GREEN}OK${NC} (Connected, ${hc_connecting} peers connecting)"
+            else
+                echo -e "${GREEN}OK${NC} (Connected, awaiting peers)"
+            fi
         else
             # Check for explicit connection message
-            local connected=""
-            connected=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "Connected to Psiphon" 2>/dev/null | head -1 || echo "0")
-            connected=${connected:-0}
-            if [ "$connected" -gt 0 ] 2>/dev/null; then
+            local connected_msg=""
+            connected_msg=$(echo "$hc_logs" | grep -c "Connected to Psiphon" 2>/dev/null | head -1 || echo "0")
+            connected_msg=${connected_msg:-0}
+            if [ "$connected_msg" -gt 0 ] 2>/dev/null; then
                 echo -e "${GREEN}OK${NC} (Connected to Psiphon network)"
             else
                 local info_lines=""
-                info_lines=$(docker logs --tail 100 "$CONTAINER_NAME" 2>/dev/null | grep -c "\[INFO\]" 2>/dev/null | head -1 || echo "0")
+                info_lines=$(echo "$hc_logs" | grep -c "\[INFO\]" 2>/dev/null | head -1 || echo "0")
                 info_lines=${info_lines:-0}
                 if [ "$info_lines" -gt 0 ] 2>/dev/null; then
                     echo -e "${YELLOW}CONNECTING${NC} - Establishing connection..."
@@ -1782,10 +1838,11 @@ health_check() {
         echo -e "${RED}N/A${NC} - Container not running"
     fi
 
+    # 9. Stats output
     echo -n "  Stats output:         "
     if container_running; then
         if [ "$stats_count" -gt 0 ] 2>/dev/null; then
-            echo -e "${GREEN}OK${NC} (${stats_count} entries)"
+            echo -e "${GREEN}OK${NC} (${stats_count} entries in last 100 lines)"
         else
             echo -e "${YELLOW}NONE${NC} - May need restart with -v flag"
             warnings=$((warnings + 1))
@@ -1794,7 +1851,7 @@ health_check() {
         echo -e "${RED}N/A${NC}"
     fi
 
-    # 9. Check data volume
+    # 10. Check data volume
     echo -n "  Data volume:          "
     if docker volume inspect "$VOLUME_NAME" &>/dev/null; then
         echo -e "${GREEN}OK${NC}"
@@ -1803,7 +1860,7 @@ health_check() {
         all_ok=false
     fi
 
-    # 10. Check node identity key
+    # 11. Check node identity key
     echo -n "  Node identity key:    "
     local node_id=""
     node_id=$(get_node_id)
@@ -1814,7 +1871,7 @@ health_check() {
         warnings=$((warnings + 1))
     fi
 
-    # 11. Check resource limits
+    # 12. Check resource limits
     echo -n "  Resource limits:      "
     local mem_limit=""
     local cpu_limit=""
@@ -1831,7 +1888,7 @@ health_check() {
         warnings=$((warnings + 1))
     fi
 
-    # 12. Check seccomp profile
+    # 13. Check seccomp profile
     echo -n "  Seccomp profile:      "
     if [ -f "$SECCOMP_FILE" ]; then
         local seccomp_opt=""
@@ -1854,6 +1911,14 @@ health_check() {
         echo -e "${YELLOW}⚠ Passed with ${warnings} warning(s)${NC}"
     else
         echo -e "${RED}✘ Some health checks failed${NC}"
+    fi
+
+    # Show connection summary if we have peer data
+    if [ "$hc_connected" -gt 0 ] 2>/dev/null || [ "$hc_connecting" -gt 0 ] 2>/dev/null; then
+        echo ""
+        echo -e "  ${BOLD}Peer Summary:${NC}"
+        echo -e "    Connected:  ${GREEN}${hc_connected}${NC} peers"
+        echo -e "    Connecting: ${YELLOW}${hc_connecting}${NC} peers"
     fi
 
     # Show node ID if available
