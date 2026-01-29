@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="2.0.0"                                          # Script version
+readonly VERSION="2.0.1"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -720,13 +720,19 @@ get_all_container_stats() {
 
 # get_node_id: Extract the node ID from conduit_key.json in the Docker volume
 # The node ID is derived from the private key and uniquely identifies this node.
+# Arguments:
+#   $1 - Container index (optional, defaults to 1)
 # Returns:
 #   Node ID string or empty if not found
 get_node_id() {
+    local idx="${1:-1}"
+    local vol
+    vol=$(get_volume_name "$idx")
+
     # On macOS with Docker Desktop, we can't access volume mountpoints directly
     # because they exist inside the Docker VM. Always use a container to read.
     local key_content
-    key_content=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null) || key_content=""
+    key_content=$(docker run --rm -v "$vol":/data alpine cat /data/conduit_key.json 2>/dev/null) || key_content=""
 
     if [ -n "$key_content" ]; then
         # Extract privateKeyBase64, decode, take last 32 bytes, encode base64
@@ -2134,17 +2140,15 @@ health_check_single() {
         all_ok=false
     fi
 
-    # 11. Check node identity key (only for primary container)
-    if [ "$idx" -eq 1 ]; then
-        echo -n "  Node identity key:    "
-        local node_id=""
-        node_id=$(get_node_id)
-        if [ -n "$node_id" ]; then
-            echo -e "${GREEN}OK${NC}"
-        else
-            echo -e "${YELLOW}PENDING${NC} - Will be created on first run"
-            warnings=$((warnings + 1))
-        fi
+    # 11. Check node identity key (for each container)
+    echo -n "  Node identity key:    "
+    local node_id=""
+    node_id=$(get_node_id "$idx")
+    if [ -n "$node_id" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${YELLOW}PENDING${NC} - Will be created on first run"
+        warnings=$((warnings + 1))
     fi
 
     # 12. Check resource limits
@@ -2230,13 +2234,23 @@ health_check() {
         echo -e "${RED}✘ Some health checks failed${NC}"
     fi
 
-    # Show node ID if available (from primary container)
-    local node_id=""
-    node_id=$(get_node_id)
-    if [ -n "$node_id" ]; then
-        echo ""
-        echo -e "  Node ID: ${CYAN}${node_id}${NC}"
-    fi
+    # Show node IDs for all containers
+    echo ""
+    local i=1
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        local node_id=""
+        node_id=$(get_node_id "$i")
+        if [ -n "$node_id" ]; then
+            if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                local name
+                name=$(get_container_name "$i")
+                echo -e "  Node ID (${name}): ${CYAN}${node_id}${NC}"
+            else
+                echo -e "  Node ID: ${CYAN}${node_id}${NC}"
+            fi
+        fi
+        i=$((i + 1))
+    done
 
     if [ "$CONTAINER_COUNT" -gt 1 ]; then
         echo ""
@@ -3129,6 +3143,138 @@ remove_container_menu() {
     sleep 2
 }
 
+# restart_single_container: Restart a specific container
+restart_single_container() {
+    print_header
+    echo -e "${CYAN}═══ RESTART SINGLE CONTAINER ═══${NC}"
+    echo ""
+    echo "  Select container to restart:"
+    echo ""
+
+    local i=1
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        local name
+        name=$(get_container_name "$i")
+        local status
+        if container_running "$i"; then
+            status="${GREEN}Running${NC}"
+        else
+            status="${RED}Stopped${NC}"
+        fi
+        printf "  %d. %-18s [%b]\n" "$i" "$name" "$status"
+        i=$((i + 1))
+    done
+
+    echo ""
+    echo "  0. Cancel"
+    echo ""
+    read -p " Select container: " restart_choice
+
+    if [ "$restart_choice" = "0" ] || [ -z "$restart_choice" ]; then
+        return
+    fi
+
+    # Validate input
+    if ! echo "$restart_choice" | grep -qE '^[0-9]+$'; then
+        echo -e "${RED}Invalid selection.${NC}"
+        sleep 1
+        return
+    fi
+
+    if [ "$restart_choice" -lt 1 ] || [ "$restart_choice" -gt "$CONTAINER_COUNT" ]; then
+        echo -e "${RED}Invalid container number.${NC}"
+        sleep 1
+        return
+    fi
+
+    local name
+    name=$(get_container_name "$restart_choice")
+
+    echo ""
+    echo -e "${BLUE}Restarting ${name}...${NC}"
+
+    if container_running "$restart_choice"; then
+        docker restart "$name" >/dev/null 2>&1
+    else
+        docker start "$name" >/dev/null 2>&1
+    fi
+
+    echo -e "${GREEN}✔ ${name} restarted.${NC}"
+    log_info "Restarted container $name"
+    sleep 2
+}
+
+# stop_single_container: Stop a specific container
+stop_single_container() {
+    print_header
+    echo -e "${CYAN}═══ STOP SINGLE CONTAINER ═══${NC}"
+    echo ""
+    echo "  Select container to stop:"
+    echo ""
+
+    local running_any=false
+    local i=1
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        local name
+        name=$(get_container_name "$i")
+        local status
+        if container_running "$i"; then
+            status="${GREEN}Running${NC}"
+            running_any=true
+        else
+            status="${RED}Stopped${NC}"
+        fi
+        printf "  %d. %-18s [%b]\n" "$i" "$name" "$status"
+        i=$((i + 1))
+    done
+
+    if [ "$running_any" = false ]; then
+        echo ""
+        echo -e "${YELLOW}No containers are currently running.${NC}"
+        sleep 2
+        return
+    fi
+
+    echo ""
+    echo "  0. Cancel"
+    echo ""
+    read -p " Select container: " stop_choice
+
+    if [ "$stop_choice" = "0" ] || [ -z "$stop_choice" ]; then
+        return
+    fi
+
+    # Validate input
+    if ! echo "$stop_choice" | grep -qE '^[0-9]+$'; then
+        echo -e "${RED}Invalid selection.${NC}"
+        sleep 1
+        return
+    fi
+
+    if [ "$stop_choice" -lt 1 ] || [ "$stop_choice" -gt "$CONTAINER_COUNT" ]; then
+        echo -e "${RED}Invalid container number.${NC}"
+        sleep 1
+        return
+    fi
+
+    local name
+    name=$(get_container_name "$stop_choice")
+
+    if ! container_running "$stop_choice"; then
+        echo ""
+        echo -e "${YELLOW}${name} is already stopped.${NC}"
+        sleep 1
+        return
+    fi
+
+    echo ""
+    echo -e "${BLUE}Stopping ${name}...${NC}"
+    docker stop "$name" >/dev/null 2>&1
+    echo -e "${GREEN}✔ ${name} stopped.${NC}"
+    log_info "Stopped container $name"
+    sleep 2
+}
+
 # show_container_manager: Container management menu
 show_container_manager() {
     while true; do
@@ -3191,6 +3337,11 @@ show_container_manager() {
         echo "  2. ➖ Remove Container"
         echo "  3. 🔄 Restart All"
         echo "  4. ⏹️  Stop All"
+        if [ "$CONTAINER_COUNT" -gt 1 ]; then
+            echo ""
+            echo "  5. 🔄 Restart One Container"
+            echo "  6. ⏹️  Stop One Container"
+        fi
         echo ""
         echo "  0. ← Back to Main Menu"
         echo ""
@@ -3206,6 +3357,22 @@ show_container_manager() {
             4)
                 print_header
                 stop_service
+                ;;
+            5)
+                if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                    restart_single_container
+                else
+                    echo -e "${RED}Invalid option.${NC}"
+                    sleep 1
+                fi
+                ;;
+            6)
+                if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                    stop_single_container
+                else
+                    echo -e "${RED}Invalid option.${NC}"
+                    sleep 1
+                fi
                 ;;
             0|"") return ;;
             *)

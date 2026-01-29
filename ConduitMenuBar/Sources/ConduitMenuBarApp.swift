@@ -36,7 +36,7 @@ enum TerminalApp: String, CaseIterable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "2.0.0"
+    private let version = "2.0.1"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
