@@ -1637,7 +1637,10 @@ view_dashboard() {
                     # Store per-container info for multi-container view
                     if [ "$CONTAINER_COUNT" -gt 1 ]; then
                         local uptime_short
-                        uptime_short=$(docker ps -f "name=$name" --format '{{.Status}}' 2>/dev/null | sed 's/Up //' | cut -d' ' -f1-2) || uptime_short="?"
+                        # Get container uptime and format it compactly
+                        uptime_short=$(docker ps -f "name=^${name}$" --format '{{.Status}}' 2>/dev/null | head -1) || uptime_short="?"
+                        # Remove "Up " prefix and format compactly
+                        uptime_short=$(echo "$uptime_short" | sed 's/^Up //' | sed 's/About /~/' | sed 's/ seconds\?/s/' | sed 's/ minutes\?/m/' | sed 's/ hours\?/h/' | sed 's/ days\?/d/' | sed 's/ weeks\?/w/' | sed 's/an hour/1h/' | sed 's/a minute/1m/')
                         container_statuses="${container_statuses}${name}|${conn:-0}|${max_clients:-200}|${uptime_short}\n"
                     fi
                 fi
