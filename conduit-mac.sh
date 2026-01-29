@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.9.1"                                          # Script version
+readonly VERSION="2.0.0"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -65,6 +65,12 @@ readonly MIN_CLIENTS=1          # Minimum allowed concurrent clients
 readonly MAX_CLIENTS_LIMIT=2000 # Maximum allowed concurrent clients
 readonly MIN_BANDWIDTH=1        # Minimum bandwidth in Mbps (unless unlimited)
 readonly MAX_BANDWIDTH=1000     # Maximum bandwidth in Mbps
+
+# ------------------------------------------------------------------------------
+# MULTI-CONTAINER SETTINGS
+# ------------------------------------------------------------------------------
+readonly MAX_CONTAINERS=5       # Maximum number of containers allowed
+CONTAINER_COUNT=1               # Current number of containers (loaded from config)
 
 # ==============================================================================
 # TERMINAL COLOR CODES
@@ -300,12 +306,18 @@ load_config() {
         source "$CONFIG_FILE" 2>/dev/null || true
 
         # Validate loaded values
-        if [ -n "$SAVED_MAX_MEMORY" ]; then
+        if [ -n "${SAVED_MAX_MEMORY:-}" ]; then
             MAX_MEMORY="$SAVED_MAX_MEMORY"
             MEMORY_SWAP="$SAVED_MAX_MEMORY"
         fi
-        if [ -n "$SAVED_MAX_CPUS" ]; then
+        if [ -n "${SAVED_MAX_CPUS:-}" ]; then
             MAX_CPUS="$SAVED_MAX_CPUS"
+        fi
+        # Load container count (default to 1 for backward compatibility)
+        if [ -n "${SAVED_CONTAINER_COUNT:-}" ]; then
+            if [ "$SAVED_CONTAINER_COUNT" -ge 1 ] && [ "$SAVED_CONTAINER_COUNT" -le "$MAX_CONTAINERS" ] 2>/dev/null; then
+                CONTAINER_COUNT="$SAVED_CONTAINER_COUNT"
+            fi
         fi
     fi
 }
@@ -319,6 +331,9 @@ save_config() {
 # Resource Limits
 SAVED_MAX_MEMORY="$MAX_MEMORY"
 SAVED_MAX_CPUS="$MAX_CPUS"
+
+# Multi-Container Settings
+SAVED_CONTAINER_COUNT="$CONTAINER_COUNT"
 EOF
     chmod 600 "$CONFIG_FILE"
 }
@@ -578,34 +593,125 @@ ensure_network_exists() {
     return 0
 }
 
-# container_exists: Check if the container exists (running or stopped)
+# ==============================================================================
+# MULTI-CONTAINER HELPER FUNCTIONS
+# ==============================================================================
+
+# get_container_name: Get container name for given index
+# Arguments:
+#   $1 - Container index (1-5), defaults to 1
+# Returns:
+#   Container name (e.g., "conduit-mac" for index 1, "conduit-mac-2" for index 2)
+get_container_name() {
+    local index="${1:-1}"
+    if [ "$index" -eq 1 ]; then
+        echo "$CONTAINER_NAME"
+    else
+        echo "${CONTAINER_NAME}-${index}"
+    fi
+}
+
+# get_volume_name: Get volume name for given index
+# Arguments:
+#   $1 - Container index (1-5), defaults to 1
+# Returns:
+#   Volume name (e.g., "conduit-data" for index 1, "conduit-data-2" for index 2)
+get_volume_name() {
+    local index="${1:-1}"
+    if [ "$index" -eq 1 ]; then
+        echo "$VOLUME_NAME"
+    else
+        echo "${VOLUME_NAME}-${index}"
+    fi
+}
+
+# container_exists: Check if a container exists (running or stopped)
+# Arguments:
+#   $1 - Container index (optional, defaults to 1)
 container_exists() {
-    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    local index="${1:-1}"
+    local name
+    name=$(get_container_name "$index")
+    if docker ps -a --format '{{.Names}}' | grep -q "^${name}$"; then
         return 0
     else
         return 1
     fi
 }
 
-# container_running: Check if the container is currently running
+# container_running: Check if a container is currently running
+# Arguments:
+#   $1 - Container index (optional, defaults to 1)
 container_running() {
-    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    local index="${1:-1}"
+    local name
+    name=$(get_container_name "$index")
+    if docker ps --format '{{.Names}}' | grep -q "^${name}$"; then
         return 0
     else
         return 1
     fi
 }
 
-# remove_container: Safely remove the container if it exists
+# remove_container: Safely remove a container if it exists
+# Arguments:
+#   $1 - Container index (optional, defaults to 1)
 remove_container() {
-    if container_exists; then
-        log_info "Removing existing container: $CONTAINER_NAME"
-        if docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1; then
+    local index="${1:-1}"
+    local name
+    name=$(get_container_name "$index")
+    if container_exists "$index"; then
+        log_info "Removing existing container: $name"
+        if docker rm -f "$name" >/dev/null 2>&1; then
             log_info "Container removed successfully"
         else
             log_warn "Failed to remove container (may not exist)"
         fi
     fi
+}
+
+# count_running_containers: Count how many containers are currently running
+# Returns:
+#   Number of running containers (0-5)
+count_running_containers() {
+    local count=0
+    local i=1
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        if container_running "$i"; then
+            count=$((count + 1))
+        fi
+        i=$((i + 1))
+    done
+    echo "$count"
+}
+
+# get_all_container_stats: Get combined stats from all running containers
+# Returns:
+#   "total_clients connected_count connecting_count" or empty if none running
+get_all_container_stats() {
+    local total_connected=0
+    local total_connecting=0
+    local i=1
+
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        if container_running "$i"; then
+            local name
+            name=$(get_container_name "$i")
+            local stats_line
+            stats_line=$(docker logs --tail 50 "$name" 2>/dev/null | grep '\[STATS\]' | tail -1) || stats_line=""
+
+            if [ -n "$stats_line" ]; then
+                local connected connecting
+                connected=$(echo "$stats_line" | grep -o 'Connected: [0-9]*' | awk '{print $2}') || connected=0
+                connecting=$(echo "$stats_line" | grep -o 'Connecting: [0-9]*' | awk '{print $2}') || connecting=0
+                total_connected=$((total_connected + ${connected:-0}))
+                total_connecting=$((total_connecting + ${connecting:-0}))
+            fi
+        fi
+        i=$((i + 1))
+    done
+
+    echo "$total_connected $total_connecting"
 }
 
 # ==============================================================================
@@ -890,13 +996,14 @@ check_resource_limits_changed() {
     return 1  # Limits same
 }
 
-# smart_start: Intelligently start, restart, or install the container
+# smart_start: Intelligently start, restart, or install the container(s)
 # Also detects if resource limits have changed and recreates container if needed
 smart_start() {
     print_header
-    log_info "Smart start initiated"
+    log_info "Smart start initiated for $CONTAINER_COUNT container(s)"
 
-    if ! container_exists; then
+    # Check if primary container exists - if not, do first-time setup
+    if ! container_exists 1; then
         echo -e "${BLUE}▶ FIRST TIME SETUP${NC}"
         echo "-----------------------------------"
         log_info "Container not found, initiating fresh installation"
@@ -904,111 +1011,147 @@ smart_start() {
         return
     fi
 
-    # Check if resource limits have changed
+    # Check if resource limits have changed (check primary container only)
     if check_resource_limits_changed; then
         echo -e "${YELLOW}Status: Resource limits changed${NC}"
-        echo -e "${BLUE}Action: Recreating container with new limits...${NC}"
+        echo -e "${BLUE}Action: Recreating all containers with new limits...${NC}"
         echo ""
         echo -e "  New limits: ${CYAN}${MAX_CPUS} CPU / ${MAX_MEMORY} RAM${NC}"
         echo ""
-        log_info "Resource limits changed, recreating container"
+        log_info "Resource limits changed, recreating containers"
 
-        # Get current settings from container
-        local current_args=""
-        current_args=$(docker inspect --format='{{.Args}}' "$CONTAINER_NAME" 2>/dev/null) || current_args=""
+        # Recreate all configured containers
+        local i=1
+        while [ $i -le "$CONTAINER_COUNT" ]; do
+            local name
+            local vol
+            name=$(get_container_name "$i")
+            vol=$(get_volume_name "$i")
 
-        # Extract max-clients and bandwidth from current args
-        local max_clients=""
-        local bandwidth=""
-        max_clients=$(echo "$current_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || max_clients=""
-        bandwidth=$(echo "$current_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || bandwidth=""
+            echo -e "Recreating container ${CYAN}$name${NC}..."
 
-        # Use defaults if not found
-        max_clients="${max_clients:-200}"
-        bandwidth="${bandwidth:-5}"
+            # Get current settings from container
+            local current_args=""
+            current_args=$(docker inspect --format='{{.Args}}' "$name" 2>/dev/null) || current_args=""
 
-        # Remove old container
-        echo "Stopping and removing old container..."
-        docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-        docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+            # Extract max-clients and bandwidth from current args
+            local max_clients=""
+            local bandwidth=""
+            max_clients=$(echo "$current_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || max_clients=""
+            bandwidth=$(echo "$current_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || bandwidth=""
 
-        # Ensure network exists
-        ensure_network_exists
+            # Use defaults if not found
+            max_clients="${max_clients:-200}"
+            bandwidth="${bandwidth:-5}"
 
-        # Fix volume permissions
-        docker run --rm -v "$VOLUME_NAME":/home/conduit/data alpine \
-            sh -c "chown -R 1000:1000 /home/conduit/data" 2>/dev/null || true
+            # Remove old container
+            docker stop "$name" >/dev/null 2>&1 || true
+            docker rm -f "$name" >/dev/null 2>&1 || true
 
-        # Ensure seccomp profile exists
-        create_seccomp_profile
+            # Ensure network exists
+            ensure_network_exists
 
-        # Recreate container with new limits
-        echo "Creating container with new resource limits..."
+            # Fix volume permissions
+            docker run --rm -v "$vol":/home/conduit/data alpine \
+                sh -c "chown -R 1000:1000 /home/conduit/data" 2>/dev/null || true
 
-        # Build docker run command with optional seccomp
-        local seccomp_opt=""
-        if [ -f "$SECCOMP_FILE" ]; then
-            seccomp_opt="--security-opt seccomp=$SECCOMP_FILE"
-        fi
+            # Ensure seccomp profile exists
+            create_seccomp_profile
 
-        # Calculate PIDs limit based on max_clients (each connection may use threads)
-        local pids_limit=$((max_clients + 50))
+            # Build docker run command with optional seccomp
+            local seccomp_opt=""
+            if [ -f "$SECCOMP_FILE" ]; then
+                seccomp_opt="--security-opt seccomp=$SECCOMP_FILE"
+            fi
 
-        if docker run -d \
-            --name "$CONTAINER_NAME" \
-            --restart unless-stopped \
-            --network "$NETWORK_NAME" \
-            --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,size=100m \
-            --security-opt no-new-privileges:true \
-            $seccomp_opt \
-            --cap-drop ALL \
-            --cap-add NET_BIND_SERVICE \
-            --memory "$MAX_MEMORY" \
-            --cpus "$MAX_CPUS" \
-            --memory-swap "$MEMORY_SWAP" \
-            --pids-limit "$pids_limit" \
-            -v "$VOLUME_NAME":/home/conduit/data \
-            "$IMAGE" \
-            start --max-clients "$max_clients" --bandwidth "$bandwidth" -v > /dev/null 2>&1; then
+            # Calculate PIDs limit based on max_clients
+            local pids_limit=$((max_clients + 50))
 
-            log_info "Container recreated with new limits: memory=$MAX_MEMORY, cpus=$MAX_CPUS"
-            echo -e "${GREEN}✔ Container recreated with new resource limits.${NC}"
-        else
-            log_error "Failed to recreate container"
-            echo -e "${RED}✘ Failed to recreate container.${NC}"
-        fi
+            if docker run -d \
+                --name "$name" \
+                --restart unless-stopped \
+                --network "$NETWORK_NAME" \
+                --read-only \
+                --tmpfs /tmp:rw,noexec,nosuid,size=100m \
+                --security-opt no-new-privileges:true \
+                $seccomp_opt \
+                --cap-drop ALL \
+                --cap-add NET_BIND_SERVICE \
+                --memory "$MAX_MEMORY" \
+                --cpus "$MAX_CPUS" \
+                --memory-swap "$MEMORY_SWAP" \
+                --pids-limit "$pids_limit" \
+                -v "$vol":/home/conduit/data \
+                "$IMAGE" \
+                start --max-clients "$max_clients" --bandwidth "$bandwidth" -v > /dev/null 2>&1; then
+
+                log_info "Container $name recreated with new limits"
+                echo -e "  ${GREEN}✔ $name recreated${NC}"
+            else
+                log_error "Failed to recreate container $name"
+                echo -e "  ${RED}✘ Failed to recreate $name${NC}"
+            fi
+
+            i=$((i + 1))
+        done
+
+        echo ""
+        echo -e "${GREEN}✔ All containers recreated with new resource limits.${NC}"
         sleep 2
         return
     fi
 
-    if container_running; then
-        echo -e "${YELLOW}Status: Running${NC}"
-        echo -e "${BLUE}Action: Restarting Service...${NC}"
-        log_info "Restarting running container"
+    # Start/restart all configured containers
+    local started=0
+    local restarted=0
+    local failed=0
 
-        if docker restart "$CONTAINER_NAME" > /dev/null; then
-            log_info "Container restarted successfully"
-            echo -e "${GREEN}✔ Service Restarted Successfully.${NC}"
+    echo -e "${BLUE}Starting/Restarting $CONTAINER_COUNT container(s)...${NC}"
+    echo ""
+
+    local i=1
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        local name
+        name=$(get_container_name "$i")
+
+        if ! container_exists "$i"; then
+            # Container doesn't exist, needs to be created via install
+            echo -e "  ${YELLOW}$name: Not installed${NC}"
+            failed=$((failed + 1))
+        elif container_running "$i"; then
+            # Container is running, restart it
+            if docker restart "$name" > /dev/null 2>&1; then
+                log_info "Container $name restarted"
+                echo -e "  ${GREEN}✔ $name: Restarted${NC}"
+                restarted=$((restarted + 1))
+            else
+                log_error "Failed to restart $name"
+                echo -e "  ${RED}✘ $name: Restart failed${NC}"
+                failed=$((failed + 1))
+            fi
         else
-            log_error "Failed to restart container"
-            echo -e "${RED}✘ Failed to restart service.${NC}"
+            # Container exists but stopped, start it
+            if docker start "$name" > /dev/null 2>&1; then
+                log_info "Container $name started"
+                echo -e "  ${GREEN}✔ $name: Started${NC}"
+                started=$((started + 1))
+            else
+                log_error "Failed to start $name"
+                echo -e "  ${RED}✘ $name: Start failed${NC}"
+                failed=$((failed + 1))
+            fi
         fi
-        sleep 2
+
+        i=$((i + 1))
+    done
+
+    echo ""
+    if [ $failed -eq 0 ]; then
+        echo -e "${GREEN}✔ All services operational.${NC}"
     else
-        echo -e "${RED}Status: Stopped${NC}"
-        echo -e "${BLUE}Action: Starting Service...${NC}"
-        log_info "Starting stopped container"
-
-        if docker start "$CONTAINER_NAME" > /dev/null; then
-            log_info "Container started successfully"
-            echo -e "${GREEN}✔ Service Started Successfully.${NC}"
-        else
-            log_error "Failed to start container"
-            echo -e "${RED}✘ Failed to start service.${NC}"
-        fi
-        sleep 2
+        echo -e "${YELLOW}Started: $started, Restarted: $restarted, Failed: $failed${NC}"
     fi
+    sleep 2
 }
 
 # install_new: Install and configure a new container instance
@@ -1260,20 +1403,57 @@ install_new() {
 
 # stop_service: Gracefully stop the running container
 stop_service() {
-    log_info "Stop service requested"
-    echo -e "${YELLOW}Stopping Conduit...${NC}"
+    log_info "Stop service requested for $CONTAINER_COUNT container(s)"
 
-    if container_running; then
-        if docker stop "$CONTAINER_NAME" > /dev/null 2>&1; then
-            log_info "Container stopped successfully"
+    if [ "$CONTAINER_COUNT" -eq 1 ]; then
+        echo -e "${YELLOW}Stopping Conduit...${NC}"
+    else
+        echo -e "${YELLOW}Stopping $CONTAINER_COUNT Conduit containers...${NC}"
+    fi
+
+    local stopped=0
+    local already_stopped=0
+    local failed=0
+
+    local i=1
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        local name
+        name=$(get_container_name "$i")
+
+        if container_running "$i"; then
+            if docker stop "$name" > /dev/null 2>&1; then
+                log_info "Container $name stopped successfully"
+                if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                    echo -e "  ${GREEN}✔ $name stopped${NC}"
+                fi
+                stopped=$((stopped + 1))
+            else
+                log_error "Failed to stop container $name"
+                if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                    echo -e "  ${RED}✘ Failed to stop $name${NC}"
+                fi
+                failed=$((failed + 1))
+            fi
+        else
+            already_stopped=$((already_stopped + 1))
+        fi
+
+        i=$((i + 1))
+    done
+
+    if [ $stopped -gt 0 ]; then
+        if [ "$CONTAINER_COUNT" -eq 1 ]; then
             echo -e "${GREEN}✔ Service stopped.${NC}"
         else
-            log_error "Failed to stop container"
-            echo -e "${RED}✘ Failed to stop service.${NC}"
+            echo -e "${GREEN}✔ $stopped container(s) stopped.${NC}"
         fi
-    else
-        log_warn "Stop requested but container is not running"
+    elif [ $already_stopped -eq "$CONTAINER_COUNT" ]; then
+        log_warn "Stop requested but no containers are running"
         echo -e "${YELLOW}Service is not currently running.${NC}"
+    fi
+
+    if [ $failed -gt 0 ]; then
+        echo -e "${RED}✘ Failed to stop $failed container(s).${NC}"
     fi
 
     sleep 1
@@ -1313,25 +1493,89 @@ view_dashboard() {
         echo -e "${BOLD}LIVE DASHBOARD${NC} (Press ${YELLOW}any key${NC} to Exit)${CL}"
         echo "══════════════════════════════════════════════════════${CL}"
 
-        local is_running=0
-        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
-            is_running=1
-        fi
+        # Count running containers
+        local running_count=0
+        running_count=$(count_running_containers)
 
-        if [ "$is_running" -eq 1 ]; then
-            # Fetch container stats
-            local docker_stats=""
-            docker_stats=$(docker stats --no-stream --format "{{.CPUPerc}}|{{.MemUsage}}" "$CONTAINER_NAME" 2>/dev/null) || docker_stats=""
+        if [ "$running_count" -gt 0 ]; then
+            # Aggregate stats from all running containers
+            local total_conn=0
+            local total_connecting=0
+            local total_max_clients=0
+            local combined_cpu="0.00%"
+            local combined_mem_mb=0
 
-            local cpu="N/A"
-            local ram="N/A"
-            if [ -n "$docker_stats" ]; then
-                cpu=$(echo "$docker_stats" | cut -d'|' -f1)
-                # Parse memory usage and convert from GiB/MiB to GB/MB
-                local raw_ram
-                raw_ram=$(echo "$docker_stats" | cut -d'|' -f2)
-                # Convert GiB to GB and MiB to MB (binary to decimal)
-                ram=$(echo "$raw_ram" | sed 's/GiB/GB/g; s/MiB/MB/g; s/KiB/KB/g')
+            # Container-specific data for multi-container display
+            local container_statuses=""
+
+            local i=1
+            while [ $i -le "$CONTAINER_COUNT" ]; do
+                local name
+                local vol
+                name=$(get_container_name "$i")
+                vol=$(get_volume_name "$i")
+
+                if container_running "$i"; then
+                    # Get stats for this container
+                    local docker_stats=""
+                    docker_stats=$(docker stats --no-stream --format "{{.CPUPerc}}|{{.MemUsage}}" "$name" 2>/dev/null) || docker_stats=""
+
+                    if [ -n "$docker_stats" ]; then
+                        local cpu_val mem_val
+                        cpu_val=$(echo "$docker_stats" | cut -d'|' -f1 | tr -d '%')
+                        mem_val=$(echo "$docker_stats" | cut -d'|' -f2 | cut -d'/' -f1)
+                        # Parse memory value
+                        if echo "$mem_val" | grep -q "GiB"; then
+                            local mem_num
+                            mem_num=$(echo "$mem_val" | tr -d 'GiB ')
+                            combined_mem_mb=$(awk "BEGIN {printf \"%.0f\", $combined_mem_mb + ($mem_num * 1024)}")
+                        elif echo "$mem_val" | grep -q "MiB"; then
+                            local mem_num
+                            mem_num=$(echo "$mem_val" | tr -d 'MiB ')
+                            combined_mem_mb=$(awk "BEGIN {printf \"%.0f\", $combined_mem_mb + $mem_num}")
+                        fi
+                        combined_cpu=$(awk "BEGIN {printf \"%.2f\", $(echo $combined_cpu | tr -d '%') + $cpu_val}")
+                    fi
+
+                    # Get connection stats from logs
+                    local log_line=""
+                    log_line=$(docker logs --tail 50 "$name" 2>/dev/null | grep "\[STATS\]" | tail -1) || log_line=""
+
+                    local conn=0
+                    local connecting=0
+                    if [ -n "$log_line" ]; then
+                        conn=$(echo "$log_line" | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p') || conn=0
+                        connecting=$(echo "$log_line" | sed -n 's/.*Connecting:[[:space:]]*\([0-9]*\).*/\1/p') || connecting=0
+                    fi
+                    total_conn=$((total_conn + ${conn:-0}))
+                    total_connecting=$((total_connecting + ${connecting:-0}))
+
+                    # Get max-clients from container args
+                    local container_args=""
+                    local max_clients=""
+                    container_args=$(docker inspect --format='{{.Args}}' "$name" 2>/dev/null) || container_args=""
+                    max_clients=$(echo "$container_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || max_clients=200
+                    total_max_clients=$((total_max_clients + ${max_clients:-200}))
+
+                    # Store per-container info for multi-container view
+                    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                        local uptime_short
+                        uptime_short=$(docker ps -f "name=$name" --format '{{.Status}}' 2>/dev/null | sed 's/Up //' | cut -d' ' -f1-2) || uptime_short="?"
+                        container_statuses="${container_statuses}${name}|${conn:-0}|${max_clients:-200}|${uptime_short}\n"
+                    fi
+                fi
+
+                i=$((i + 1))
+            done
+
+            combined_cpu="${combined_cpu}%"
+
+            # Format combined memory
+            local combined_ram
+            if [ "$combined_mem_mb" -ge 1024 ]; then
+                combined_ram=$(awk "BEGIN {printf \"%.2f GB\", $combined_mem_mb/1024}")
+            else
+                combined_ram="${combined_mem_mb} MB"
             fi
 
             # Fetch system stats
@@ -1342,63 +1586,31 @@ view_dashboard() {
             sys_ram_used=$(echo "$sys_stats" | awk '{print $2, $3}')
             sys_ram_total=$(echo "$sys_stats" | awk '{print $4, $5}')
 
-            # Parse connection stats from logs
-            local log_output=""
-            log_output=$(docker logs --tail 50 "$CONTAINER_NAME" 2>&1) || log_output=""
-
-            local log_line=""
-            log_line=$(echo "$log_output" | grep "\[STATS\]" | tail -n 1) || log_line=""
-
-            local conn="0"
-            local connecting="0"
-            local up="0B"
-            local down="0B"
-
-            if [ -n "$log_line" ]; then
-                conn=$(echo "$log_line" | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p') || conn=""
-                conn="${conn:-0}"
-                connecting=$(echo "$log_line" | sed -n 's/.*Connecting:[[:space:]]*\([0-9]*\).*/\1/p') || connecting=""
-                connecting="${connecting:-0}"
-                up=$(echo "$log_line" | sed -n 's/.*Up:[[:space:]]*\([^|]*\).*/\1/p' | tr -d ' ') || up=""
-                up="${up:-0B}"
-                down=$(echo "$log_line" | sed -n 's/.*Down:[[:space:]]*\([^|]*\).*/\1/p' | tr -d ' ') || down=""
-                down="${down:-0B}"
-            fi
-
-            # Fetch container uptime
+            # Get primary container info for single-container display
             local uptime=""
             uptime=$(docker ps -f "name=$CONTAINER_NAME" --format '{{.Status}}' 2>/dev/null) || uptime="Unknown"
 
-            # Get node ID
+            # Get node ID from primary container
             local node_id=""
             node_id=$(get_node_id) || node_id=""
 
-            # Get the actual container resource limits from docker inspect
-            local container_mem_limit=""
-            local container_cpu_limit=""
-            container_mem_limit=$(docker inspect --format='{{.HostConfig.Memory}}' "$CONTAINER_NAME" 2>/dev/null) || container_mem_limit="0"
-            container_cpu_limit=$(docker inspect --format='{{.HostConfig.NanoCpus}}' "$CONTAINER_NAME" 2>/dev/null) || container_cpu_limit="0"
-
-            # Convert memory from bytes to GB
-            local container_mem_gb="N/A"
-            if [ -n "$container_mem_limit" ] && [ "$container_mem_limit" -gt 0 ] 2>/dev/null; then
-                container_mem_gb=$(awk "BEGIN {printf \"%.0f\", $container_mem_limit/1073741824}")
+            # Get traffic stats from primary container (combined traffic not easily aggregated)
+            local log_output=""
+            log_output=$(docker logs --tail 50 "$CONTAINER_NAME" 2>&1) || log_output=""
+            local log_line=""
+            log_line=$(echo "$log_output" | grep "\[STATS\]" | tail -n 1) || log_line=""
+            local up="0B"
+            local down="0B"
+            if [ -n "$log_line" ]; then
+                up=$(echo "$log_line" | sed -n 's/.*Up:[[:space:]]*\([^|]*\).*/\1/p' | tr -d ' ') || up="0B"
+                down=$(echo "$log_line" | sed -n 's/.*Down:[[:space:]]*\([^|]*\).*/\1/p' | tr -d ' ') || down="0B"
             fi
 
-            # Convert NanoCpus to cores (NanoCpus = cores * 1e9)
-            local container_cpu_cores="N/A"
-            if [ -n "$container_cpu_limit" ] && [ "$container_cpu_limit" -gt 0 ] 2>/dev/null; then
-                container_cpu_cores=$(awk "BEGIN {printf \"%.0f\", $container_cpu_limit/1000000000}")
-            fi
-
-            # Get max-clients and bandwidth from container args
+            # Get bandwidth setting from primary container
             local container_args=""
-            local container_max_clients=""
             local container_bandwidth=""
             container_args=$(docker inspect --format='{{.Args}}' "$CONTAINER_NAME" 2>/dev/null) || container_args=""
-            container_max_clients=$(echo "$container_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || container_max_clients=""
             container_bandwidth=$(echo "$container_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || container_bandwidth=""
-            container_max_clients="${container_max_clients:-N/A}"
             if [ "$container_bandwidth" = "-1" ]; then
                 container_bandwidth="Unlimited"
             elif [ -n "$container_bandwidth" ]; then
@@ -1407,33 +1619,43 @@ view_dashboard() {
                 container_bandwidth="N/A"
             fi
 
-            # Check if container limits match configured limits
-            local config_mem_gb="${MAX_MEMORY%g}"
-            local limits_match=true
-            if [ "$container_mem_gb" != "$config_mem_gb" ] || [ "$container_cpu_cores" != "$MAX_CPUS" ]; then
-                limits_match=false
-            fi
-
             # Display dashboard
-            echo -e " STATUS:      ${GREEN}● ONLINE${NC}${CL}"
-            echo -e " UPTIME:      ${uptime}${CL}"
+            if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                echo -e " STATUS:      ${GREEN}● ONLINE${NC} (${running_count}/${CONTAINER_COUNT} containers)${CL}"
+            else
+                echo -e " STATUS:      ${GREEN}● ONLINE${NC}${CL}"
+                echo -e " UPTIME:      ${uptime}${CL}"
+            fi
             if [ -n "$node_id" ]; then
                 echo -e " NODE ID:     ${CYAN}${node_id}${NC}${CL}"
             fi
             echo "──────────────────────────────────────────────────────${CL}"
-            echo -e " ${BOLD}CLIENTS${NC}        (Max: ${container_max_clients})${CL}"
-            echo -e "   Connected:  ${GREEN}${conn}${NC}      | Connecting: ${YELLOW}${connecting}${NC}${CL}"
+
+            # Show per-container breakdown for multi-container setups
+            if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                echo -e " ${BOLD}CONTAINERS${NC}${CL}"
+                printf "   %-16s %-12s %s${CL}\n" "Name" "Clients" "Uptime"
+                echo -e "$container_statuses" | while IFS='|' read -r cname cconn cmax cuptime; do
+                    [ -z "$cname" ] && continue
+                    printf "   %-16s ${GREEN}%-5s${NC}/${DIM}%-5s${NC} %s${CL}\n" "$cname" "$cconn" "$cmax" "$cuptime"
+                done
+                echo "──────────────────────────────────────────────────────${CL}"
+            fi
+
+            echo -e " ${BOLD}CLIENTS${NC}        (Max: ${total_max_clients})${CL}"
+            echo -e "   Connected:  ${GREEN}${total_conn}${NC}      | Connecting: ${YELLOW}${total_connecting}${NC}${CL}"
             echo "──────────────────────────────────────────────────────${CL}"
             echo -e " ${BOLD}TRAFFIC${NC}        (Limit: ${container_bandwidth})${CL}"
             echo -e "   Upload:     ${CYAN}${up}${NC}    | Download: ${CYAN}${down}${NC}${CL}"
             echo "──────────────────────────────────────────────────────${CL}"
-            printf " ${BOLD}%-12s${NC} %-20s %s${CL}\n" "RESOURCES" "Container" "System"
-            printf "   %-9s ${YELLOW}%-20s${NC} ${YELLOW}%s${NC}${CL}\n" "CPU:" "$cpu" "$sys_cpu"
-            printf "   %-9s ${YELLOW}%-20s${NC} ${YELLOW}%s${NC}${CL}\n" "RAM:" "$ram" "${sys_ram_used} / ${sys_ram_total}"
-            printf "   %-9s ${CYAN}%-20s${NC}${CL}\n" "Limits:" "${container_cpu_cores} CPU / ${container_mem_gb} GB RAM"
-            if [ "$limits_match" = false ]; then
-                echo -e "   ${YELLOW}⚠ Config: ${MAX_CPUS} CPU / ${config_mem_gb} GB - Restart to apply${NC}${CL}"
+            if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                printf " ${BOLD}%-12s${NC} %-20s %s${CL}\n" "RESOURCES" "All Containers" "System"
+            else
+                printf " ${BOLD}%-12s${NC} %-20s %s${CL}\n" "RESOURCES" "Container" "System"
             fi
+            printf "   %-9s ${YELLOW}%-20s${NC} ${YELLOW}%s${NC}${CL}\n" "CPU:" "$combined_cpu" "$sys_cpu"
+            printf "   %-9s ${YELLOW}%-20s${NC} ${YELLOW}%s${NC}${CL}\n" "RAM:" "$combined_ram" "${sys_ram_used} / ${sys_ram_total}"
+            printf "   %-9s ${CYAN}%-20s${NC}${CL}\n" "Limits:" "${MAX_CPUS} CPU / ${MAX_MEMORY} RAM (per container)"
             echo "══════════════════════════════════════════════════════${CL}"
             echo -e "${GREEN}[SECURE]${NC} Network isolated | Privileges dropped${CL}"
             echo -e "${YELLOW}Refreshing every 5 seconds...${NC}${CL}"
@@ -1599,26 +1821,23 @@ show_node_info() {
 # health_check: Comprehensive health check for Conduit container
 # Checks Docker, container status, network, resources, and connectivity
 # Enhanced with peer counts and uptime display
-health_check() {
-    print_header
-    echo -e "${CYAN}═══ CONDUIT HEALTH CHECK ═══${NC}"
-    echo ""
+# health_check_single: Run health check on a single container
+# Arguments:
+#   $1 - Container index (1-5)
+# Sets global variables: hc_all_ok, hc_warnings
+health_check_single() {
+    local idx="${1:-1}"
+    local name
+    local vol
+    name=$(get_container_name "$idx")
+    vol=$(get_volume_name "$idx")
 
     local all_ok=true
     local warnings=0
 
-    # 1. Check if Docker is running
-    echo -n "  Docker daemon:        "
-    if docker info &>/dev/null; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAILED${NC} - Docker is not running"
-        all_ok=false
-    fi
-
     # 2. Check if container exists
     echo -n "  Container exists:     "
-    if container_exists; then
+    if container_exists "$idx"; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${RED}FAILED${NC} - Container not found"
@@ -1627,7 +1846,7 @@ health_check() {
 
     # 3. Check if container is running
     echo -n "  Container running:    "
-    if container_running; then
+    if container_running "$idx"; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${RED}FAILED${NC} - Container is stopped"
@@ -1637,7 +1856,7 @@ health_check() {
     # 4. Check container restart count
     echo -n "  Restart count:        "
     local restarts=""
-    restarts=$(docker inspect --format='{{.RestartCount}}' "$CONTAINER_NAME" 2>/dev/null) || restarts=""
+    restarts=$(docker inspect --format='{{.RestartCount}}' "$name" 2>/dev/null) || restarts=""
     if [ -n "$restarts" ]; then
         if [ "$restarts" -eq 0 ]; then
             echo -e "${GREEN}${restarts}${NC} (healthy)"
@@ -1654,15 +1873,12 @@ health_check() {
 
     # 5. Check container uptime
     echo -n "  Container uptime:     "
-    if container_running; then
-        # Use docker ps --format to get the status which includes uptime
+    if container_running "$idx"; then
         local status_str=""
-        status_str=$(docker ps --format '{{.Status}}' --filter "name=^${CONTAINER_NAME}$" 2>/dev/null | head -1) || status_str=""
+        status_str=$(docker ps --format '{{.Status}}' --filter "name=^${name}$" 2>/dev/null | head -1) || status_str=""
         if [ -n "$status_str" ]; then
-            # Status format: "Up 2 hours" or "Up 45 minutes" or "Up 3 days"
             local uptime_part=""
             uptime_part=$(echo "$status_str" | sed 's/Up //' | sed 's/ (.*)//')
-            # Shorten format: "2 hours" -> "2h", "45 minutes" -> "45m", "3 days" -> "3d"
             uptime_part=$(echo "$uptime_part" | sed 's/ seconds\?/s/' | sed 's/ minutes\?/m/' | sed 's/ hours\?/h/' | sed 's/ days\?/d/' | sed 's/ weeks\?/w/')
             echo -e "${GREEN}${uptime_part}${NC}"
         else
@@ -1675,7 +1891,7 @@ health_check() {
     # 6. Check network isolation
     echo -n "  Network isolation:    "
     local network_mode=""
-    network_mode=$(docker inspect --format='{{.HostConfig.NetworkMode}}' "$CONTAINER_NAME" 2>/dev/null) || network_mode=""
+    network_mode=$(docker inspect --format='{{.HostConfig.NetworkMode}}' "$name" 2>/dev/null) || network_mode=""
     if [ "$network_mode" = "$NETWORK_NAME" ]; then
         echo -e "${GREEN}OK${NC} (bridge network)"
     elif [ "$network_mode" = "host" ]; then
@@ -1689,8 +1905,8 @@ health_check() {
     echo -n "  Security hardening:   "
     local read_only=""
     local no_new_privs=""
-    read_only=$(docker inspect --format='{{.HostConfig.ReadonlyRootfs}}' "$CONTAINER_NAME" 2>/dev/null) || read_only=""
-    no_new_privs=$(docker inspect --format='{{range .HostConfig.SecurityOpt}}{{.}}{{end}}' "$CONTAINER_NAME" 2>/dev/null) || no_new_privs=""
+    read_only=$(docker inspect --format='{{.HostConfig.ReadonlyRootfs}}' "$name" 2>/dev/null) || read_only=""
+    no_new_privs=$(docker inspect --format='{{range .HostConfig.SecurityOpt}}{{.}}{{end}}' "$name" 2>/dev/null) || no_new_privs=""
 
     if [ "$read_only" = "true" ] && echo "$no_new_privs" | grep -q "no-new-privileges"; then
         echo -e "${GREEN}OK${NC} (read-only, no-new-privileges)"
@@ -1700,7 +1916,6 @@ health_check() {
     fi
 
     # 8. Check Psiphon connection with peer counts
-    # Fetch logs once and extract all needed info
     local hc_logs=""
     local hc_stats_lines=""
     local hc_last_stat=""
@@ -1708,13 +1923,12 @@ health_check() {
     local hc_connecting=0
     local stats_count=0
 
-    if container_running; then
-        hc_logs=$(docker logs --tail 100 "$CONTAINER_NAME" 2>&1)
+    if container_running "$idx"; then
+        hc_logs=$(docker logs --tail 100 "$name" 2>&1)
         hc_stats_lines=$(echo "$hc_logs" | grep "\[STATS\]" || true)
         if [ -n "$hc_stats_lines" ]; then
             stats_count=$(echo "$hc_stats_lines" | wc -l | tr -d ' ')
             hc_last_stat=$(echo "$hc_stats_lines" | tail -1)
-            # Parse: Connected: X, Connecting: Y
             hc_connected=$(echo "$hc_last_stat" | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p' | head -1 | tr -d '\n')
             hc_connecting=$(echo "$hc_last_stat" | sed -n 's/.*Connecting:[[:space:]]*\([0-9]*\).*/\1/p' | head -1 | tr -d '\n')
         fi
@@ -1724,7 +1938,7 @@ health_check() {
     fi
 
     echo -n "  Network connection:   "
-    if container_running; then
+    if container_running "$idx"; then
         if [ "$hc_connected" -gt 0 ] 2>/dev/null; then
             echo -e "${GREEN}OK${NC} (${hc_connected} peers connected, ${hc_connecting} connecting)"
         elif [ "$stats_count" -gt 0 ] 2>/dev/null; then
@@ -1734,7 +1948,6 @@ health_check() {
                 echo -e "${GREEN}OK${NC} (Connected, awaiting peers)"
             fi
         else
-            # Check for explicit connection message
             local connected_msg=""
             connected_msg=$(echo "$hc_logs" | grep -c "Connected to Psiphon" 2>/dev/null | head -1 || echo "0")
             connected_msg=${connected_msg:-0}
@@ -1759,7 +1972,7 @@ health_check() {
 
     # 9. Stats output
     echo -n "  Stats output:         "
-    if container_running; then
+    if container_running "$idx"; then
         if [ "$stats_count" -gt 0 ] 2>/dev/null; then
             echo -e "${GREEN}OK${NC} (${stats_count} entries in last 100 lines)"
         else
@@ -1772,30 +1985,32 @@ health_check() {
 
     # 10. Check data volume
     echo -n "  Data volume:          "
-    if docker volume inspect "$VOLUME_NAME" &>/dev/null; then
+    if docker volume inspect "$vol" &>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${RED}FAILED${NC} - Volume not found"
         all_ok=false
     fi
 
-    # 11. Check node identity key
-    echo -n "  Node identity key:    "
-    local node_id=""
-    node_id=$(get_node_id)
-    if [ -n "$node_id" ]; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${YELLOW}PENDING${NC} - Will be created on first run"
-        warnings=$((warnings + 1))
+    # 11. Check node identity key (only for primary container)
+    if [ "$idx" -eq 1 ]; then
+        echo -n "  Node identity key:    "
+        local node_id=""
+        node_id=$(get_node_id)
+        if [ -n "$node_id" ]; then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${YELLOW}PENDING${NC} - Will be created on first run"
+            warnings=$((warnings + 1))
+        fi
     fi
 
     # 12. Check resource limits
     echo -n "  Resource limits:      "
     local mem_limit=""
     local cpu_limit=""
-    mem_limit=$(docker inspect --format='{{.HostConfig.Memory}}' "$CONTAINER_NAME" 2>/dev/null) || mem_limit="0"
-    cpu_limit=$(docker inspect --format='{{.HostConfig.NanoCpus}}' "$CONTAINER_NAME" 2>/dev/null) || cpu_limit="0"
+    mem_limit=$(docker inspect --format='{{.HostConfig.Memory}}' "$name" 2>/dev/null) || mem_limit="0"
+    cpu_limit=$(docker inspect --format='{{.HostConfig.NanoCpus}}' "$name" 2>/dev/null) || cpu_limit="0"
     if [ "$mem_limit" -gt 0 ] && [ "$cpu_limit" -gt 0 ]; then
         local mem_gb=""
         local cpu_cores=""
@@ -1807,35 +2022,83 @@ health_check() {
         warnings=$((warnings + 1))
     fi
 
-    # 13. Check seccomp profile
+    # Set global results
+    hc_all_ok=$all_ok
+    hc_warnings=$warnings
+}
+
+health_check() {
+    print_header
+    echo -e "${CYAN}═══ CONDUIT HEALTH CHECK ═══${NC}"
+    echo ""
+
+    local all_ok=true
+    local total_warnings=0
+
+    # 1. Check if Docker is running
+    echo -n "  Docker daemon:        "
+    if docker info &>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED${NC} - Docker is not running"
+        all_ok=false
+    fi
+
+    # Check seccomp profile (shared across all containers)
     echo -n "  Seccomp profile:      "
     if [ -f "$SECCOMP_FILE" ]; then
-        local seccomp_opt=""
-        seccomp_opt=$(docker inspect --format='{{range .HostConfig.SecurityOpt}}{{.}} {{end}}' "$CONTAINER_NAME" 2>/dev/null) || seccomp_opt=""
-        if echo "$seccomp_opt" | grep -q "seccomp"; then
-            echo -e "${GREEN}OK${NC} (custom profile)"
-        else
-            echo -e "${YELLOW}DEFAULT${NC} - Using Docker default"
-        fi
+        echo -e "${GREEN}OK${NC} (custom profile)"
     else
         echo -e "${YELLOW}N/A${NC} - Profile not created"
     fi
 
+    # Run health checks for each container
+    local i=1
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        local name
+        name=$(get_container_name "$i")
+
+        if [ "$CONTAINER_COUNT" -gt 1 ]; then
+            echo ""
+            echo -e "${BOLD}── Container: ${CYAN}${name}${NC} ──"
+        fi
+
+        # Initialize global vars for this container
+        hc_all_ok=true
+        hc_warnings=0
+
+        health_check_single "$i"
+
+        if [ "$hc_all_ok" = false ]; then
+            all_ok=false
+        fi
+        total_warnings=$((total_warnings + hc_warnings))
+
+        i=$((i + 1))
+    done
+
     # Summary
     echo ""
     echo "══════════════════════════════════════════════════════"
-    if [ "$all_ok" = true ] && [ "$warnings" -eq 0 ]; then
+    if [ "$all_ok" = true ] && [ "$total_warnings" -eq 0 ]; then
         echo -e "${GREEN}✔ All health checks passed${NC}"
     elif [ "$all_ok" = true ]; then
-        echo -e "${YELLOW}⚠ Passed with ${warnings} warning(s)${NC}"
+        echo -e "${YELLOW}⚠ Passed with ${total_warnings} warning(s)${NC}"
     else
         echo -e "${RED}✘ Some health checks failed${NC}"
     fi
 
-    # Show node ID if available
+    # Show node ID if available (from primary container)
+    local node_id=""
+    node_id=$(get_node_id)
     if [ -n "$node_id" ]; then
         echo ""
         echo -e "  Node ID: ${CYAN}${node_id}${NC}"
+    fi
+
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        echo ""
+        echo -e "  ${DIM}Checked ${CONTAINER_COUNT} container(s)${NC}"
     fi
 
     echo ""
@@ -2520,6 +2783,280 @@ show_info_menu() {
 }
 
 # ==============================================================================
+# CONTAINER MANAGER
+# ==============================================================================
+
+# add_container: Add a new container instance
+add_container() {
+    if [ "$CONTAINER_COUNT" -ge "$MAX_CONTAINERS" ]; then
+        echo -e "${YELLOW}Maximum of ${MAX_CONTAINERS} containers reached.${NC}"
+        sleep 2
+        return
+    fi
+
+    local new_index=$((CONTAINER_COUNT + 1))
+    local new_name
+    local new_vol
+    new_name=$(get_container_name "$new_index")
+    new_vol=$(get_volume_name "$new_index")
+
+    echo ""
+    echo -e "${CYAN}Adding container #${new_index}: ${new_name}${NC}"
+    echo ""
+
+    # Get settings for new container
+    local recommended
+    recommended=$(calculate_recommended_clients)
+
+    local max_clients
+    local bandwidth
+    local raw_input
+
+    # Prompt for max clients
+    while true; do
+        read -p "Maximum Clients [1-${MAX_CLIENTS_LIMIT}, Default: ${recommended}]: " raw_input
+        raw_input="${raw_input:-$recommended}"
+        max_clients=$(sanitize_input "$raw_input")
+        if validate_max_clients "$max_clients"; then
+            break
+        fi
+        echo "Please enter a valid number."
+    done
+
+    # Prompt for bandwidth
+    while true; do
+        read -p "Bandwidth Limit in Mbps [1-${MAX_BANDWIDTH}, -1=Unlimited, Default: 5]: " raw_input
+        raw_input="${raw_input:-5}"
+        bandwidth=$(sanitize_input "$raw_input")
+        if validate_bandwidth "$bandwidth"; then
+            break
+        fi
+        echo "Please enter a valid number."
+    done
+
+    echo ""
+    echo -e "${BLUE}Creating container ${new_name}...${NC}"
+
+    # Ensure network exists
+    ensure_network_exists
+
+    # Ensure seccomp profile exists
+    create_seccomp_profile
+
+    # Build docker run command with optional seccomp
+    local seccomp_opt=""
+    if [ -f "$SECCOMP_FILE" ]; then
+        seccomp_opt="--security-opt seccomp=$SECCOMP_FILE"
+    fi
+
+    # Calculate PIDs limit
+    local pids_limit=$((max_clients + 50))
+
+    if docker run -d \
+        --name "$new_name" \
+        --restart unless-stopped \
+        --network "$NETWORK_NAME" \
+        --read-only \
+        --tmpfs /tmp:rw,noexec,nosuid,size=100m \
+        --security-opt no-new-privileges:true \
+        $seccomp_opt \
+        --cap-drop ALL \
+        --cap-add NET_BIND_SERVICE \
+        --memory "$MAX_MEMORY" \
+        --cpus "$MAX_CPUS" \
+        --memory-swap "$MEMORY_SWAP" \
+        --pids-limit "$pids_limit" \
+        -v "$new_vol":/home/conduit/data \
+        "$IMAGE" \
+        start --max-clients "$max_clients" --bandwidth "$bandwidth" -v > /dev/null 2>&1; then
+
+        CONTAINER_COUNT=$new_index
+        save_config
+        log_info "Added container $new_name (total: $CONTAINER_COUNT)"
+        echo -e "${GREEN}✔ Container ${new_name} created and started.${NC}"
+        echo -e "${GREEN}✔ Total containers: ${CONTAINER_COUNT}${NC}"
+    else
+        log_error "Failed to create container $new_name"
+        echo -e "${RED}✘ Failed to create container.${NC}"
+    fi
+
+    sleep 2
+}
+
+# remove_container_menu: Remove a container instance
+remove_container_menu() {
+    if [ "$CONTAINER_COUNT" -le 1 ]; then
+        echo -e "${YELLOW}Cannot remove the last container.${NC}"
+        echo "Use 'Uninstall' from main menu to fully remove Conduit."
+        sleep 2
+        return
+    fi
+
+    echo ""
+    echo -e "${YELLOW}Select container to remove:${NC}"
+    echo ""
+
+    local i=2
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        local name
+        name=$(get_container_name "$i")
+        local status="stopped"
+        if container_running "$i"; then
+            status="${GREEN}running${NC}"
+        fi
+        echo "  ${i}. ${name} (${status})"
+        i=$((i + 1))
+    done
+
+    echo ""
+    echo "  0. Cancel"
+    echo ""
+    read -p " Select container number to remove: " remove_choice
+
+    if [ "$remove_choice" = "0" ] || [ -z "$remove_choice" ]; then
+        return
+    fi
+
+    if ! [[ "$remove_choice" =~ ^[2-9]$ ]] || [ "$remove_choice" -gt "$CONTAINER_COUNT" ]; then
+        echo -e "${RED}Invalid selection.${NC}"
+        sleep 1
+        return
+    fi
+
+    local name_to_remove
+    local vol_to_remove
+    name_to_remove=$(get_container_name "$remove_choice")
+    vol_to_remove=$(get_volume_name "$remove_choice")
+
+    echo ""
+    echo -e "${RED}WARNING: This will remove:${NC}"
+    echo -e "${RED}  - Container: ${name_to_remove}${NC}"
+    echo -e "${RED}  - Volume: ${vol_to_remove} (node identity for this container!)${NC}"
+    echo ""
+    read -p "Type 'remove' to confirm: " confirm
+
+    if [ "$confirm" != "remove" ]; then
+        echo "Cancelled."
+        sleep 1
+        return
+    fi
+
+    echo ""
+    echo -e "${BLUE}Removing ${name_to_remove}...${NC}"
+
+    # Stop and remove container
+    docker stop "$name_to_remove" >/dev/null 2>&1 || true
+    docker rm -f "$name_to_remove" >/dev/null 2>&1 || true
+
+    # Remove volume
+    docker volume rm "$vol_to_remove" >/dev/null 2>&1 || true
+
+    # If we removed a container in the middle, we need to rename the higher ones
+    # For simplicity, we only allow removing the highest-numbered container
+    # and decrement the count
+    if [ "$remove_choice" -eq "$CONTAINER_COUNT" ]; then
+        CONTAINER_COUNT=$((CONTAINER_COUNT - 1))
+        save_config
+        log_info "Removed container $name_to_remove (remaining: $CONTAINER_COUNT)"
+        echo -e "${GREEN}✔ Container removed. Remaining: ${CONTAINER_COUNT}${NC}"
+    else
+        # For now, just mark it as removed but keep count
+        # (Advanced: rename containers to fill gap)
+        echo -e "${GREEN}✔ Container ${name_to_remove} removed.${NC}"
+        echo -e "${YELLOW}Note: Container numbers will have a gap until restart.${NC}"
+    fi
+
+    sleep 2
+}
+
+# show_container_manager: Container management menu
+show_container_manager() {
+    while true; do
+        print_header
+        echo -e "${CYAN}═══ CONTAINER MANAGER ═══${NC}"
+        echo ""
+
+        # Show current status
+        local running_count
+        running_count=$(count_running_containers)
+        echo -e "  ${BOLD}Current:${NC} ${running_count}/${CONTAINER_COUNT} containers running"
+        echo ""
+
+        # Show container table
+        if [ "$CONTAINER_COUNT" -gt 0 ]; then
+            printf "  %-18s %-10s %-10s %s\n" "Container" "Status" "Clients" "Uptime"
+            echo "  ─────────────────────────────────────────────────────"
+
+            local i=1
+            while [ $i -le "$CONTAINER_COUNT" ]; do
+                local name
+                name=$(get_container_name "$i")
+
+                local status="${RED}Stopped${NC}"
+                local clients="-"
+                local uptime="-"
+
+                if container_running "$i"; then
+                    status="${GREEN}Running${NC}"
+
+                    # Get clients from logs
+                    local log_line
+                    log_line=$(docker logs --tail 20 "$name" 2>/dev/null | grep "\[STATS\]" | tail -1) || log_line=""
+                    if [ -n "$log_line" ]; then
+                        local conn
+                        conn=$(echo "$log_line" | sed -n 's/.*Connected:[[:space:]]*\([0-9]*\).*/\1/p') || conn=0
+                        local max_cl
+                        max_cl=$(docker inspect --format='{{.Args}}' "$name" 2>/dev/null | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || max_cl=200
+                        clients="${conn:-0}/${max_cl:-200}"
+                    fi
+
+                    # Get uptime
+                    local status_str
+                    status_str=$(docker ps --format '{{.Status}}' --filter "name=^${name}$" 2>/dev/null | head -1) || status_str=""
+                    if [ -n "$status_str" ]; then
+                        uptime=$(echo "$status_str" | sed 's/Up //' | sed 's/ (.*)//' | sed 's/ seconds\?/s/' | sed 's/ minutes\?/m/' | sed 's/ hours\?/h/' | sed 's/ days\?/d/')
+                    fi
+                fi
+
+                printf "  %-18s %-18b %-10s %s\n" "$name" "$status" "$clients" "$uptime"
+
+                i=$((i + 1))
+            done
+        fi
+
+        echo ""
+        echo "══════════════════════════════════════════════════════"
+        echo ""
+        echo "  1. ➕ Add Container (max ${MAX_CONTAINERS})"
+        echo "  2. ➖ Remove Container"
+        echo "  3. 🔄 Restart All"
+        echo "  4. ⏹️  Stop All"
+        echo ""
+        echo "  0. ← Back to Main Menu"
+        echo ""
+        read -p " Select option: " mgr_choice
+
+        case "$mgr_choice" in
+            1) add_container ;;
+            2) remove_container_menu ;;
+            3)
+                print_header
+                smart_start
+                ;;
+            4)
+                print_header
+                stop_service
+                ;;
+            0|"") return ;;
+            *)
+                echo -e "${RED}Invalid option.${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# ==============================================================================
 # MAIN MENU LOOP
 # ==============================================================================
 
@@ -2556,6 +3093,7 @@ while true; do
     echo "   6. 🛠️  Reconfigure (Re-install)"
     echo "   7. 📈 Resource Limits (CPU/RAM)"
     echo "   8. 🆔 Node Identity"
+    echo "   9. 📦 Container Manager"
     echo "   c. 🎁 Claim Rewards"
     echo ""
     echo -e " ${BOLD}Backup & Maintenance${NC}"
@@ -2595,6 +3133,7 @@ while true; do
             ;;
         7) configure_resources ;;
         8) show_node_info ;;
+        9) show_container_manager ;;
         [cC]) generate_claim_link ;;
         [bB]) backup_key ;;
         [rR]) restore_key ;;

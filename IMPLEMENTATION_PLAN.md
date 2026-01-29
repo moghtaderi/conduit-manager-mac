@@ -309,12 +309,12 @@ Phase 4 (Multi-Container)  <- Most complex, requires all prior phases stable
 
 ## Version Bumping
 
-| Phase | Version | Notes |
-|-------|---------|-------|
-| 1 | 1.8.0 | Improved health check |
-| 2 | 1.9.0 | Info & Help hub |
-| 3 | 1.10.0 | Live peers by country |
-| 4 | 2.0.0 | Multi-container (major feature) |
+| Phase | Version | Status | Notes |
+|-------|---------|--------|-------|
+| 1 | 1.8.0 | ✅ Complete | Improved health check |
+| 2 | 1.9.0 | ✅ Complete | Info & Help hub |
+| 3 | N/A | ❌ Removed | Live peers (Conduit doesn't log peer IPs) |
+| 4 | 2.0.0 | ✅ Complete | Multi-container (major feature) |
 
 ---
 
