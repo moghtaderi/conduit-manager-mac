@@ -36,7 +36,7 @@ enum TerminalApp: String, CaseIterable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "2.0.4"
+    private let version = "2.0.5"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
@@ -77,7 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(infoItem("", tag: 101, hidden: true))  // Docker helper message
         menu.addItem(infoItem("Clients: -", tag: 102))
         menu.addItem(infoItem("Traffic: -", tag: 103))
-        menu.addItem(infoItem("Uptime: -", tag: 104))
+        // Uptime removed from main view - shown per-container in submenu only
         menu.addItem(.separator())
 
         // Per-container stats section (hidden by default, shown when multiple containers)
@@ -304,16 +304,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             item.isHidden = docker != .running
         }
-
-        // Uptime (104)
-        if let item = menu.item(withTag: 104) {
-            if running, let uptime = manager?.uptime {
-                updateInfo(item, "Uptime: \(uptime)")
-            } else {
-                updateInfo(item, "Uptime: -")
-            }
-            item.isHidden = docker != .running
-        }
+        // Uptime removed from main view - shown per-container in submenu only
     }
 
     private func updatePerContainerStats(menu: NSMenu, docker: DockerStatus) {

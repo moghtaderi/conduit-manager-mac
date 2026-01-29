@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="2.0.4"                                          # Script version
+readonly VERSION="2.0.5"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -1088,6 +1088,33 @@ smart_start() {
         return
     fi
 
+    # For multi-container setups, offer choice of all or individual
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        echo -e "${CYAN}═══ START / RESTART ═══${NC}"
+        echo ""
+        echo "  1. Start/Restart ALL containers"
+        echo "  2. Start/Restart individual container"
+        echo "  0. Cancel"
+        echo ""
+        read -p " Select option: " start_choice
+
+        case "$start_choice" in
+            1)
+                # Continue to start all (fall through to existing logic)
+                print_header
+                ;;
+            2)
+                restart_single_container
+                return
+                ;;
+            *)
+                echo "Cancelled."
+                sleep 1
+                return
+                ;;
+        esac
+    fi
+
     # Check if resource limits have changed (check primary container only)
     if check_resource_limits_changed; then
         echo -e "${YELLOW}Status: Resource limits changed${NC}"
@@ -1482,6 +1509,33 @@ install_new() {
 stop_service() {
     log_info "Stop service requested for $CONTAINER_COUNT container(s)"
 
+    # For multi-container setups, offer choice of all or individual
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        print_header
+        echo -e "${CYAN}═══ STOP SERVICE ═══${NC}"
+        echo ""
+        echo "  1. Stop ALL containers"
+        echo "  2. Stop individual container"
+        echo "  0. Cancel"
+        echo ""
+        read -p " Select option: " stop_choice
+
+        case "$stop_choice" in
+            1)
+                # Continue to stop all (fall through to existing logic)
+                ;;
+            2)
+                stop_single_container
+                return
+                ;;
+            *)
+                echo "Cancelled."
+                sleep 1
+                return
+                ;;
+        esac
+    fi
+
     if [ "$CONTAINER_COUNT" -eq 1 ]; then
         echo -e "${YELLOW}Stopping Conduit...${NC}"
     else
@@ -1707,8 +1761,26 @@ view_dashboard() {
                 echo -e " STATUS:      ${GREEN}● ONLINE${NC}${CL}"
                 echo -e " UPTIME:      ${uptime}${CL}"
             fi
-            if [ -n "$node_id" ]; then
-                echo -e " NODE ID:     ${CYAN}${node_id}${NC}${CL}"
+            # Show all Node IDs for multi-container, single for single-container
+            if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                echo "──────────────────────────────────────────────────────${CL}"
+                echo -e " ${BOLD}NODE IDs${NC}${CL}"
+                local nid_i=1
+                while [ $nid_i -le "$CONTAINER_COUNT" ]; do
+                    local nid_name nid_val
+                    nid_name=$(get_container_name "$nid_i")
+                    nid_val=$(get_node_id "$nid_i") || nid_val=""
+                    if [ -n "$nid_val" ]; then
+                        printf "   %-16s ${CYAN}%s${NC}${CL}\n" "$nid_name:" "$nid_val"
+                    else
+                        printf "   %-16s ${DIM}(not available)${NC}${CL}\n" "$nid_name:"
+                    fi
+                    nid_i=$((nid_i + 1))
+                done
+            else
+                if [ -n "$node_id" ]; then
+                    echo -e " NODE ID:     ${CYAN}${node_id}${NC}${CL}"
+                fi
             fi
             echo "──────────────────────────────────────────────────────${CL}"
 
@@ -3144,6 +3216,288 @@ show_info_menu() {
 # CONTAINER MANAGER
 # ==============================================================================
 
+# reconfigure_container: Reconfigure a container's max-clients and bandwidth
+# Usage: reconfigure_container [container_index]
+# If no index provided, prompts for selection
+reconfigure_container() {
+    local target_index="$1"
+    local target_name target_vol
+
+    # If no index provided, prompt for selection
+    if [ -z "$target_index" ] && [ "$CONTAINER_COUNT" -gt 1 ]; then
+        print_header
+        echo -e "${CYAN}═══ RECONFIGURE CONTAINER ═══${NC}"
+        echo ""
+        echo "  Select container to reconfigure:"
+        echo ""
+
+        local rc_i=1
+        while [ $rc_i -le "$CONTAINER_COUNT" ]; do
+            local rc_name rc_status
+            rc_name=$(get_container_name "$rc_i")
+            if container_running "$rc_i"; then
+                rc_status="${GREEN}Running${NC}"
+            else
+                rc_status="${RED}Stopped${NC}"
+            fi
+            # Show current settings
+            local rc_args rc_max rc_bw
+            rc_args=$(docker inspect --format='{{.Args}}' "$rc_name" 2>/dev/null) || rc_args=""
+            rc_max=$(echo "$rc_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || rc_max="?"
+            rc_bw=$(echo "$rc_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || rc_bw="?"
+            [ "$rc_bw" = "-1" ] && rc_bw="Unlimited"
+            printf "  %d. %-16s [%b] (clients: %s, bandwidth: %s)\n" "$rc_i" "$rc_name" "$rc_status" "${rc_max:-?}" "${rc_bw:-?}"
+            rc_i=$((rc_i + 1))
+        done
+
+        echo ""
+        echo "  0. Cancel"
+        echo ""
+        read -p " Select container: " target_index
+
+        if [ "$target_index" = "0" ] || [ -z "$target_index" ]; then
+            return
+        fi
+
+        if ! echo "$target_index" | grep -qE '^[0-9]+$'; then
+            echo -e "${RED}Invalid selection.${NC}"
+            sleep 1
+            return
+        fi
+
+        if [ "$target_index" -lt 1 ] || [ "$target_index" -gt "$CONTAINER_COUNT" ]; then
+            echo -e "${RED}Invalid container number.${NC}"
+            sleep 1
+            return
+        fi
+    elif [ -z "$target_index" ]; then
+        target_index=1
+    fi
+
+    target_name=$(get_container_name "$target_index")
+    target_vol=$(get_volume_name "$target_index")
+
+    # Get current settings
+    local current_args current_max current_bw
+    current_args=$(docker inspect --format='{{.Args}}' "$target_name" 2>/dev/null) || current_args=""
+    current_max=$(echo "$current_args" | grep -o '\-\-max-clients [0-9]*' | awk '{print $2}') || current_max="200"
+    current_bw=$(echo "$current_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || current_bw="5"
+
+    echo ""
+    echo -e "${CYAN}Current settings for ${target_name}:${NC}"
+    echo -e "  Max Clients: ${YELLOW}${current_max:-200}${NC}"
+    if [ "$current_bw" = "-1" ]; then
+        echo -e "  Bandwidth:   ${YELLOW}Unlimited${NC}"
+    else
+        echo -e "  Bandwidth:   ${YELLOW}${current_bw:-5} Mbps${NC}"
+    fi
+    echo ""
+
+    # Prompt for new settings
+    local max_clients bandwidth raw_input
+    local recommended
+    recommended=$(calculate_recommended_clients)
+
+    echo "Enter new settings (press Enter to keep current):"
+    echo ""
+
+    # Prompt for max clients
+    while true; do
+        read -p "Maximum Clients [1-${MAX_CLIENTS_LIMIT}, Current: ${current_max:-200}]: " raw_input
+        raw_input="${raw_input:-${current_max:-200}}"
+        max_clients=$(sanitize_input "$raw_input")
+        if validate_max_clients "$max_clients"; then
+            break
+        fi
+        echo "Please enter a valid number."
+    done
+
+    # Prompt for bandwidth
+    while true; do
+        local bw_display="${current_bw:-5}"
+        [ "$bw_display" = "-1" ] && bw_display="Unlimited"
+        read -p "Bandwidth Limit in Mbps [1-${MAX_BANDWIDTH}, -1=Unlimited, Current: ${bw_display}]: " raw_input
+        raw_input="${raw_input:-${current_bw:-5}}"
+        bandwidth=$(sanitize_input "$raw_input")
+        if validate_bandwidth "$bandwidth"; then
+            break
+        fi
+        echo "Please enter a valid number."
+    done
+
+    echo ""
+    echo -e "${BLUE}Reconfiguring ${target_name}...${NC}"
+
+    # Stop and remove old container (keep volume)
+    docker stop "$target_name" >/dev/null 2>&1 || true
+    docker rm -f "$target_name" >/dev/null 2>&1 || true
+
+    # Ensure network exists
+    ensure_network_exists
+
+    # Fix volume permissions
+    docker run --rm -v "$target_vol":/home/conduit/data alpine \
+        sh -c "chown -R 1000:1000 /home/conduit/data" 2>/dev/null || true
+
+    # Ensure seccomp profile exists
+    create_seccomp_profile
+
+    # Build docker run command with optional seccomp
+    local seccomp_opt=""
+    if [ -f "$SECCOMP_FILE" ]; then
+        seccomp_opt="--security-opt seccomp=$SECCOMP_FILE"
+    fi
+
+    # Calculate PIDs limit
+    local pids_limit=$((max_clients + 50))
+
+    if docker run -d \
+        --name "$target_name" \
+        --restart unless-stopped \
+        --network "$NETWORK_NAME" \
+        --read-only \
+        --tmpfs /tmp:rw,noexec,nosuid,size=100m \
+        --security-opt no-new-privileges:true \
+        $seccomp_opt \
+        --cap-drop ALL \
+        --cap-add NET_BIND_SERVICE \
+        --memory "$MAX_MEMORY" \
+        --cpus "$MAX_CPUS" \
+        --memory-swap "$MEMORY_SWAP" \
+        --pids-limit "$pids_limit" \
+        -v "$target_vol":/home/conduit/data \
+        "$IMAGE" \
+        start --max-clients "$max_clients" --bandwidth "$bandwidth" -v > /dev/null 2>&1; then
+
+        log_info "Container $target_name reconfigured with max-clients=$max_clients bandwidth=$bandwidth"
+        echo -e "${GREEN}✔ ${target_name} reconfigured successfully.${NC}"
+        echo -e "  Max Clients: ${CYAN}${max_clients}${NC}"
+        if [ "$bandwidth" = "-1" ]; then
+            echo -e "  Bandwidth:   ${CYAN}Unlimited${NC}"
+        else
+            echo -e "  Bandwidth:   ${CYAN}${bandwidth} Mbps${NC}"
+        fi
+    else
+        log_error "Failed to reconfigure container $target_name"
+        echo -e "${RED}✘ Failed to reconfigure ${target_name}.${NC}"
+    fi
+
+    sleep 2
+}
+
+# reconfigure_all_containers: Reconfigure all containers with same settings
+reconfigure_all_containers() {
+    print_header
+    echo -e "${CYAN}═══ RECONFIGURE ALL CONTAINERS ═══${NC}"
+    echo ""
+    echo -e "This will apply the same max-clients and bandwidth to all ${CONTAINER_COUNT} containers."
+    echo -e "Your node identity keys will be preserved."
+    echo ""
+
+    # Prompt for new settings
+    local max_clients bandwidth raw_input
+    local recommended
+    recommended=$(calculate_recommended_clients)
+
+    # Prompt for max clients
+    while true; do
+        read -p "Maximum Clients [1-${MAX_CLIENTS_LIMIT}, Default: ${recommended}]: " raw_input
+        raw_input="${raw_input:-$recommended}"
+        max_clients=$(sanitize_input "$raw_input")
+        if validate_max_clients "$max_clients"; then
+            break
+        fi
+        echo "Please enter a valid number."
+    done
+
+    # Prompt for bandwidth
+    while true; do
+        read -p "Bandwidth Limit in Mbps [1-${MAX_BANDWIDTH}, -1=Unlimited, Default: 5]: " raw_input
+        raw_input="${raw_input:-5}"
+        bandwidth=$(sanitize_input "$raw_input")
+        if validate_bandwidth "$bandwidth"; then
+            break
+        fi
+        echo "Please enter a valid number."
+    done
+
+    echo ""
+    echo -e "${BLUE}Reconfiguring all containers...${NC}"
+    echo ""
+
+    local success=0
+    local failed=0
+    local ra_i=1
+    while [ $ra_i -le "$CONTAINER_COUNT" ]; do
+        local ra_name ra_vol
+        ra_name=$(get_container_name "$ra_i")
+        ra_vol=$(get_volume_name "$ra_i")
+
+        echo -e "  Reconfiguring ${ra_name}..."
+
+        # Stop and remove old container (keep volume)
+        docker stop "$ra_name" >/dev/null 2>&1 || true
+        docker rm -f "$ra_name" >/dev/null 2>&1 || true
+
+        # Fix volume permissions
+        docker run --rm -v "$ra_vol":/home/conduit/data alpine \
+            sh -c "chown -R 1000:1000 /home/conduit/data" 2>/dev/null || true
+
+        # Build docker run command with optional seccomp
+        local seccomp_opt=""
+        if [ -f "$SECCOMP_FILE" ]; then
+            seccomp_opt="--security-opt seccomp=$SECCOMP_FILE"
+        fi
+
+        # Calculate PIDs limit
+        local pids_limit=$((max_clients + 50))
+
+        if docker run -d \
+            --name "$ra_name" \
+            --restart unless-stopped \
+            --network "$NETWORK_NAME" \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=100m \
+            --security-opt no-new-privileges:true \
+            $seccomp_opt \
+            --cap-drop ALL \
+            --cap-add NET_BIND_SERVICE \
+            --memory "$MAX_MEMORY" \
+            --cpus "$MAX_CPUS" \
+            --memory-swap "$MEMORY_SWAP" \
+            --pids-limit "$pids_limit" \
+            -v "$ra_vol":/home/conduit/data \
+            "$IMAGE" \
+            start --max-clients "$max_clients" --bandwidth "$bandwidth" -v > /dev/null 2>&1; then
+
+            log_info "Container $ra_name reconfigured"
+            echo -e "    ${GREEN}✔ ${ra_name} done${NC}"
+            success=$((success + 1))
+        else
+            log_error "Failed to reconfigure container $ra_name"
+            echo -e "    ${RED}✘ ${ra_name} failed${NC}"
+            failed=$((failed + 1))
+        fi
+
+        ra_i=$((ra_i + 1))
+    done
+
+    echo ""
+    if [ $failed -eq 0 ]; then
+        echo -e "${GREEN}✔ All containers reconfigured successfully.${NC}"
+        echo -e "  Max Clients: ${CYAN}${max_clients}${NC} (each)"
+        if [ "$bandwidth" = "-1" ]; then
+            echo -e "  Bandwidth:   ${CYAN}Unlimited${NC}"
+        else
+            echo -e "  Bandwidth:   ${CYAN}${bandwidth} Mbps${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Completed: ${success} succeeded, ${failed} failed.${NC}"
+    fi
+
+    sleep 2
+}
+
 # add_container: Add a new container instance
 add_container() {
     if [ "$CONTAINER_COUNT" -ge "$MAX_CONTAINERS" ]; then
@@ -3652,53 +4006,23 @@ while true; do
         5) health_check ;;
         6)
             print_header
-            echo -e "${YELLOW}═══ RECONFIGURE CONDUIT ═══${NC}"
+            echo -e "${CYAN}═══ RECONFIGURE CONDUIT ═══${NC}"
             echo ""
             if [ "$CONTAINER_COUNT" -gt 1 ]; then
-                echo -e "${YELLOW}You have ${CONTAINER_COUNT} containers configured.${NC}"
+                echo -e "You have ${YELLOW}${CONTAINER_COUNT}${NC} containers configured."
                 echo ""
-                echo "  1. Reconfigure primary container (conduit-mac)"
-                echo "  2. Reconfigure a specific container"
+                echo "  1. Reconfigure ALL containers (same settings)"
+                echo "  2. Reconfigure individual container"
                 echo "  0. Cancel"
                 echo ""
-                read -p "Select option: " reconfig_choice
+                read -p " Select option: " reconfig_choice
 
                 case "$reconfig_choice" in
                     1)
-                        echo ""
-                        echo -e "${YELLOW}This will recreate the primary container with new settings.${NC}"
-                        echo "Your node identity key will be preserved."
-                        echo ""
-                        read -p "Continue? (y/N): " confirm_reconfig
-                        if [[ "$confirm_reconfig" =~ ^[Yy]$ ]]; then
-                            install_new
-                        else
-                            echo "Reconfiguration cancelled."
-                            sleep 1
-                        fi
+                        reconfigure_all_containers
                         ;;
                     2)
-                        echo ""
-                        echo "Select container to reconfigure:"
-                        reconfig_i=1
-                        while [ $reconfig_i -le "$CONTAINER_COUNT" ]; do
-                            reconfig_name=$(get_container_name "$reconfig_i")
-                            echo "  ${reconfig_i}. ${reconfig_name}"
-                            reconfig_i=$((reconfig_i + 1))
-                        done
-                        echo ""
-                        read -p "Container number [1-$CONTAINER_COUNT]: " container_choice
-                        if [[ "$container_choice" =~ ^[1-9]$ ]] && [ "$container_choice" -le "$CONTAINER_COUNT" ]; then
-                            echo ""
-                            echo -e "${YELLOW}Reconfiguring $(get_container_name "$container_choice")...${NC}"
-                            echo "Use Container Manager (option 9) to remove and re-add"
-                            echo "containers with different settings."
-                            echo ""
-                            read -n 1 -s -r -p "Press any key to continue..."
-                        else
-                            echo -e "${RED}Invalid selection${NC}"
-                            sleep 1
-                        fi
+                        reconfigure_container
                         ;;
                     *)
                         echo "Cancelled."
@@ -3706,12 +4030,12 @@ while true; do
                         ;;
                 esac
             else
-                echo -e "${YELLOW}This will recreate the container with new settings.${NC}"
+                echo -e "${YELLOW}This will update max-clients and bandwidth settings.${NC}"
                 echo "Your node identity key will be preserved."
                 echo ""
                 read -p "Continue with reconfiguration? (y/N): " confirm_reconfig
                 if [[ "$confirm_reconfig" =~ ^[Yy]$ ]]; then
-                    install_new
+                    reconfigure_container 1
                 else
                     echo "Reconfiguration cancelled."
                     sleep 1

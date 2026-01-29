@@ -22,8 +22,10 @@
 
 | Feature | Description |
 |---------|-------------|
+| **Multi-Container** | Run up to 5 Conduit nodes simultaneously |
 | **Menu Bar App** | Native macOS app - Start/Stop with one click |
 | **Live Stats** | See connected clients & traffic in real-time |
+| **Per-Container Control** | Start, stop, reconfigure individual containers |
 | **Security Hardened** | Read-only filesystem, isolated network, seccomp |
 | **Docker Status** | Auto-detects if Docker is running |
 | **Dark Mode** | Works perfectly in light and dark mode |
@@ -66,23 +68,33 @@ Quick control without opening Terminal:
 
 ```
 ┌─────────────────────────────┐
-│ ● Conduit: Running          │
-│ Clients: 5 connected        │
-│ Traffic: ↑ 1.2 GB  ↓ 3.4 GB │
-│ Uptime: ~2h                 │
+│ ● Conduit: Running (2/2)    │
+│ Clients: 12 connected       │
+│ Traffic: ↑ 2.4 GB  ↓ 6.8 GB │
 ├─────────────────────────────┤
-│ ↻ Restart              ⌘S   │
-│ ■ Stop                 ⌘X   │
+│ ▸ Per-Container Stats       │
+├─────────────────────────────┤
+│ ▶ Start All            ⌘S   │
+│ ■ Stop All             ⌘X   │
+│ ▸ ↻ Restart One...          │
+│ ▸ ■ Stop One...             │
 ├─────────────────────────────┤
 │ Open Terminal Manager...    │
 ├─────────────────────────────┤
-│ Max Clients: 250            │
-│ Bandwidth: 15 Mbps          │
-├─────────────────────────────┤
-│ Version 1.6.0               │
+│ Version 2.0.5               │
 │ Quit                   ⌘Q   │
 └─────────────────────────────┘
 ```
+
+### Multi-Container Support
+
+Run multiple Conduit nodes on a single Mac:
+
+| Feature | Description |
+|---------|-------------|
+| **Per-Container Stats** | View clients, traffic, uptime for each container |
+| **Individual Control** | Restart or stop specific containers |
+| **Aggregated Totals** | Main view shows combined stats |
 
 ### Menu Bar Icons
 
@@ -164,14 +176,43 @@ Press `b` in the CLI menu to create a backup. Backups are saved to `~/.conduit-b
 
 ---
 
+## Multi-Container Setup
+
+Add more containers via **Container Manager** (option `9` in CLI):
+
+```
+═══ CONTAINER MANAGER ═══
+
+  Current: 2/5 containers running
+
+  NAME              STATUS     CLIENTS
+  conduit-mac       Running    5
+  conduit-mac-2     Running    7
+
+  1. Add Container
+  2. Remove Container
+  3. Restart Single Container
+  4. Stop Single Container
+```
+
+Each container gets its own:
+- Node identity (unique ID for rewards)
+- Max clients setting
+- Bandwidth limit
+- Docker volume for data persistence
+
+---
+
 ## Uninstall
 
 **Easy way:** Press `x` in the CLI menu
 
 **Manual way:**
 ```bash
-docker stop conduit-mac && docker rm conduit-mac
-docker volume rm conduit-data
+# Stop and remove all containers
+docker stop conduit-mac conduit-mac-2 conduit-mac-3 2>/dev/null
+docker rm conduit-mac conduit-mac-2 conduit-mac-3 2>/dev/null
+docker volume rm conduit-data conduit-data-2 conduit-data-3 2>/dev/null
 docker network rm conduit-network
 rm -rf ~/conduit-manager ~/.conduit-*
 ```
@@ -228,15 +269,16 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 ```
 ┌─────────────────────────────┐
-│ ● Conduit: Running          │
-│ Clients: 5 connected        │
-│ Traffic: ↑ 1.2 GB  ↓ 3.4 GB │
+│ ● Conduit: Running (2/2)    │
+│ Clients: 12 connected       │
+│ Traffic: ↑ 2.4 GB  ↓ 6.8 GB │
 ├─────────────────────────────┤
-│ ↻ Restart                   │
-│ ■ Stop                      │
+│ ▸ Per-Container Stats       │
 ├─────────────────────────────┤
-│ Max Clients: 250            │
-│ Bandwidth: 15 Mbps          │
+│ ▶ Start All                 │
+│ ■ Stop All                  │
+│ ▸ ↻ Restart One...          │
+│ ▸ ■ Stop One...             │
 └─────────────────────────────┘
 ```
 
