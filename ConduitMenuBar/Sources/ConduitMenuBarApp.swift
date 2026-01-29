@@ -36,7 +36,7 @@ enum TerminalApp: String, CaseIterable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "2.0.1"
+    private let version = "2.0.2"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
@@ -79,9 +79,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(infoItem("Uptime: -", tag: 104))
         menu.addItem(.separator())
 
+        // Per-container stats section (hidden by default, shown when multiple containers)
+        // Tag 500-504 reserved for container stats items (dynamically created)
+        let containerStatsItem = NSMenuItem(title: "Per-Container Stats", action: nil, keyEquivalent: "")
+        containerStatsItem.tag = 500
+        containerStatsItem.isHidden = true
+        let containerStatsSubmenu = NSMenu()
+        containerStatsItem.submenu = containerStatsSubmenu
+        menu.addItem(containerStatsItem)
+        menu.addItem(NSMenuItem.separator())
+
         // Controls
-        menu.addItem(actionItem("▶ Start", action: #selector(startConduit), key: "s", tag: 200))
-        menu.addItem(actionItem("■ Stop", action: #selector(stopConduit), key: "x", tag: 201))
+        menu.addItem(actionItem("▶ Start All", action: #selector(startConduit), key: "s", tag: 200))
+        menu.addItem(actionItem("■ Stop All", action: #selector(stopConduit), key: "x", tag: 201))
+
+        // Per-container control submenu (hidden when single container)
+        let restartOneItem = NSMenuItem(title: "↻ Restart One...", action: nil, keyEquivalent: "")
+        restartOneItem.tag = 210
+        restartOneItem.isHidden = true
+        restartOneItem.submenu = NSMenu()
+        menu.addItem(restartOneItem)
+
+        let stopOneItem = NSMenuItem(title: "■ Stop One...", action: nil, keyEquivalent: "")
+        stopOneItem.tag = 211
+        stopOneItem.isHidden = true
+        stopOneItem.submenu = NSMenu()
+        menu.addItem(stopOneItem)
+
         menu.addItem(.separator())
 
         // Utilities
@@ -161,6 +185,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let docker = manager.dockerStatus
         let running = docker == .running && manager.isRunning
+        let count = manager.containerCount
 
         // Update icon
         updateIcon(docker: docker, running: running)
@@ -171,7 +196,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             case .notInstalled: updateInfo(item, "⚠ Docker Not Installed", .systemOrange)
             case .notRunning:   updateInfo(item, "⚠ Docker Not Running", .systemOrange)
             case .running:
-                let count = manager.containerCount
                 if running {
                     if count.total > 1 {
                         updateInfo(item, "● Conduit: Running (\(count.running)/\(count.total))", .systemGreen)
@@ -198,12 +222,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Stats (102-104)
+        // Stats (102-104) - show aggregated totals
         updateStatsItems(menu: menu, running: running, docker: docker)
 
+        // Per-container stats submenu (500)
+        updatePerContainerStats(menu: menu, docker: docker)
+
+        // Per-container controls (210, 211)
+        updatePerContainerControls(menu: menu, docker: docker)
+
         // Controls (200-201)
-        menu.item(withTag: 200)?.title = running ? "↻ Restart" : "▶ Start"
+        menu.item(withTag: 200)?.title = running ? "↻ Restart All" : "▶ Start All"
         menu.item(withTag: 200)?.isEnabled = docker == .running
+
+        // Update button titles based on container count
+        if count.total > 1 {
+            menu.item(withTag: 200)?.title = running ? "↻ Restart All" : "▶ Start All"
+            menu.item(withTag: 201)?.title = "■ Stop All"
+        } else {
+            menu.item(withTag: 200)?.title = running ? "↻ Restart" : "▶ Start"
+            menu.item(withTag: 201)?.title = "■ Stop"
+        }
+
         menu.item(withTag: 201)?.isEnabled = running
 
         // Docker download (300)
@@ -236,7 +276,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatsItems(menu: NSMenu, running: Bool, docker: DockerStatus) {
-        // Clients (102)
+        // Clients (102) - aggregated total
         if let item = menu.item(withTag: 102) {
             if running, let stats = manager?.stats {
                 let text = stats.connecting > 0
@@ -249,7 +289,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.isHidden = docker != .running
         }
 
-        // Traffic (103)
+        // Traffic (103) - aggregated total
         if let item = menu.item(withTag: 103) {
             if running, let traffic = manager?.traffic {
                 updateInfo(item, "Traffic: ↑ \(traffic.up)  ↓ \(traffic.down)")
@@ -267,6 +307,106 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 updateInfo(item, "Uptime: -")
             }
             item.isHidden = docker != .running
+        }
+    }
+
+    private func updatePerContainerStats(menu: NSMenu, docker: DockerStatus) {
+        guard let manager = manager, let item = menu.item(withTag: 500) else { return }
+
+        let count = manager.containerCount
+        let hasMultiple = count.total > 1
+
+        item.isHidden = !hasMultiple || docker != .running
+
+        guard hasMultiple, docker == .running, let submenu = item.submenu else { return }
+
+        // Rebuild submenu with current stats
+        submenu.removeAllItems()
+
+        let containerStats = manager.perContainerStats
+
+        for stat in containerStats {
+            let statusIcon = stat.running ? "●" : "○"
+            let statusColor = stat.running ? "Running" : "Stopped"
+
+            // Container header
+            let headerItem = NSMenuItem(title: "\(statusIcon) \(stat.name) (\(statusColor))", action: nil, keyEquivalent: "")
+            headerItem.isEnabled = false
+            submenu.addItem(headerItem)
+
+            if stat.running {
+                // Stats for this container
+                let clientText = stat.connecting > 0
+                    ? "   Clients: \(stat.connected) (\(stat.connecting) connecting)"
+                    : "   Clients: \(stat.connected)"
+                let clientItem = NSMenuItem(title: clientText, action: nil, keyEquivalent: "")
+                clientItem.isEnabled = false
+                submenu.addItem(clientItem)
+
+                let trafficItem = NSMenuItem(title: "   Traffic: ↑ \(stat.up)  ↓ \(stat.down)", action: nil, keyEquivalent: "")
+                trafficItem.isEnabled = false
+                submenu.addItem(trafficItem)
+
+                let uptimeItem = NSMenuItem(title: "   Uptime: \(stat.uptime)", action: nil, keyEquivalent: "")
+                uptimeItem.isEnabled = false
+                submenu.addItem(uptimeItem)
+            }
+
+            submenu.addItem(.separator())
+        }
+
+        // Remove trailing separator if present
+        if submenu.items.last?.isSeparatorItem == true {
+            submenu.removeItem(at: submenu.items.count - 1)
+        }
+    }
+
+    private func updatePerContainerControls(menu: NSMenu, docker: DockerStatus) {
+        guard let manager = manager else { return }
+
+        let count = manager.containerCount
+        let hasMultiple = count.total > 1
+
+        // Restart One submenu (210)
+        if let restartItem = menu.item(withTag: 210) {
+            restartItem.isHidden = !hasMultiple || docker != .running
+
+            if hasMultiple, docker == .running, let submenu = restartItem.submenu {
+                submenu.removeAllItems()
+
+                for stat in manager.perContainerStats {
+                    let statusIcon = stat.running ? "●" : "○"
+                    let item = NSMenuItem(
+                        title: "\(statusIcon) \(stat.name)",
+                        action: #selector(restartContainer(_:)),
+                        keyEquivalent: ""
+                    )
+                    item.representedObject = stat.index
+                    item.target = self
+                    submenu.addItem(item)
+                }
+            }
+        }
+
+        // Stop One submenu (211)
+        if let stopItem = menu.item(withTag: 211) {
+            let anyRunning = manager.perContainerStats.contains { $0.running }
+            stopItem.isHidden = !hasMultiple || docker != .running || !anyRunning
+
+            if hasMultiple, docker == .running, let submenu = stopItem.submenu {
+                submenu.removeAllItems()
+
+                for stat in manager.perContainerStats where stat.running {
+                    let item = NSMenuItem(
+                        title: "● \(stat.name)",
+                        action: #selector(stopContainer(_:)),
+                        keyEquivalent: ""
+                    )
+                    item.representedObject = stat.index
+                    item.target = self
+                    submenu.addItem(item)
+                }
+            }
         }
     }
 
@@ -300,6 +440,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         manager?.stop()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.updateStatus() }
         notify("Conduit", "Conduit service stopped")
+    }
+
+    @objc private func restartContainer(_ sender: NSMenuItem) {
+        guard let index = sender.representedObject as? Int, let manager = manager else { return }
+        let name = manager.containerNameForIndex(index)
+        manager.restartOne(at: index)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.updateStatus() }
+        notify("Conduit", "Restarting \(name)...")
+    }
+
+    @objc private func stopContainer(_ sender: NSMenuItem) {
+        guard let index = sender.representedObject as? Int, let manager = manager else { return }
+        let name = manager.containerNameForIndex(index)
+        manager.stopOne(at: index)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.updateStatus() }
+        notify("Conduit", "\(name) stopped")
     }
 
     @objc private func openDockerDownload() {
@@ -388,6 +544,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+// MARK: - Container Stats
+
+struct ContainerStats {
+    let index: Int
+    let name: String
+    let running: Bool
+    let connected: Int
+    let connecting: Int
+    let up: String
+    let down: String
+    let uptime: String
+}
+
 // MARK: - Conduit Manager
 
 class ConduitManager {
@@ -400,6 +569,11 @@ class ConduitManager {
     /// Get container name for index (1 = "conduit-mac", 2 = "conduit-mac-2", etc.)
     private func containerName(at index: Int) -> String {
         index == 1 ? baseContainer : "\(baseContainer)-\(index)"
+    }
+
+    /// Public accessor for container name
+    func containerNameForIndex(_ index: Int) -> String {
+        containerName(at: index)
     }
 
     /// Find all configured containers (returns indices of existing containers)
@@ -471,6 +645,60 @@ class ConduitManager {
         }
     }
 
+    func restartOne(at index: Int) {
+        let name = containerName(at: index)
+        let running = runningContainers.contains(index)
+        _ = running ? run("docker", "restart", name) : run("docker", "start", name)
+    }
+
+    func stopOne(at index: Int) {
+        _ = run("docker", "stop", containerName(at: index))
+    }
+
+    // MARK: Per-Container Stats
+
+    var perContainerStats: [ContainerStats] {
+        let configured = configuredContainers
+        let running = runningContainers
+
+        return configured.map { index in
+            let name = containerName(at: index)
+            let isRunning = running.contains(index)
+
+            var connected = 0
+            var connecting = 0
+            var up = "-"
+            var down = "-"
+            var uptime = "-"
+
+            if isRunning {
+                if let line = recentStatsLine(for: name) {
+                    connected = extractInt(from: line, after: "Connected: ")
+                    connecting = extractInt(from: line, after: "Connecting: ")
+                    up = extractValue(from: line, after: "Up: ")
+                    down = extractValue(from: line, after: "Down: ")
+                }
+
+                let status = run("docker", "ps", "--format", "{{.Status}}", "--filter", "name=^\(name)$")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if status.lowercased().hasPrefix("up ") {
+                    uptime = formatUptime(String(status.dropFirst(3)))
+                }
+            }
+
+            return ContainerStats(
+                index: index,
+                name: name,
+                running: isRunning,
+                connected: connected,
+                connecting: connecting,
+                up: up,
+                down: down,
+                uptime: uptime
+            )
+        }
+    }
+
     // MARK: Aggregated Stats (from all running containers)
 
     var stats: (connected: Int, connecting: Int)? {
@@ -491,12 +719,23 @@ class ConduitManager {
     }
 
     var traffic: (up: String, down: String)? {
-        // For traffic, show primary container's traffic (aggregating bytes is complex)
-        guard let line = recentStatsLine(for: baseContainer) else { return nil }
-        let up = extractValue(from: line, after: "Up: ")
-        let down = extractValue(from: line, after: "Down: ")
-        guard up != "-" || down != "-" else { return nil }
-        return (up, down)
+        let running = runningContainers
+        guard !running.isEmpty else { return nil }
+
+        // Aggregate traffic from all running containers
+        var totalUpBytes: Int64 = 0
+        var totalDownBytes: Int64 = 0
+
+        for i in running {
+            if let line = recentStatsLine(for: containerName(at: i)) {
+                totalUpBytes += parseBytes(extractValue(from: line, after: "Up: "))
+                totalDownBytes += parseBytes(extractValue(from: line, after: "Down: "))
+            }
+        }
+
+        guard totalUpBytes > 0 || totalDownBytes > 0 else { return nil }
+
+        return (formatBytes(totalUpBytes), formatBytes(totalDownBytes))
     }
 
     var uptime: String? {
@@ -509,20 +748,7 @@ class ConduitManager {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard status.lowercased().hasPrefix("up ") else { return nil }
 
-        return String(status.dropFirst(3))
-            .replacingOccurrences(of: "About ", with: "~")
-            .replacingOccurrences(of: "an hour", with: "1h")
-            .replacingOccurrences(of: "a minute", with: "1m")
-            .replacingOccurrences(of: " seconds", with: "s")
-            .replacingOccurrences(of: " second", with: "s")
-            .replacingOccurrences(of: " minutes", with: "m")
-            .replacingOccurrences(of: " minute", with: "m")
-            .replacingOccurrences(of: " hours", with: "h")
-            .replacingOccurrences(of: " hour", with: "h")
-            .replacingOccurrences(of: " days", with: "d")
-            .replacingOccurrences(of: " day", with: "d")
-            .replacingOccurrences(of: " weeks", with: "w")
-            .replacingOccurrences(of: " week", with: "w")
+        return formatUptime(String(status.dropFirst(3)))
     }
 
     var config: (maxClients: String, bandwidth: String)? {
@@ -577,6 +803,60 @@ class ConduitManager {
         }
         let parts = rest.components(separatedBy: " ")
         return parts.count >= 2 ? "\(parts[0]) \(parts[1])" : rest.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func formatUptime(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "About ", with: "~")
+            .replacingOccurrences(of: "an hour", with: "1h")
+            .replacingOccurrences(of: "a minute", with: "1m")
+            .replacingOccurrences(of: " seconds", with: "s")
+            .replacingOccurrences(of: " second", with: "s")
+            .replacingOccurrences(of: " minutes", with: "m")
+            .replacingOccurrences(of: " minute", with: "m")
+            .replacingOccurrences(of: " hours", with: "h")
+            .replacingOccurrences(of: " hour", with: "h")
+            .replacingOccurrences(of: " days", with: "d")
+            .replacingOccurrences(of: " day", with: "d")
+            .replacingOccurrences(of: " weeks", with: "w")
+            .replacingOccurrences(of: " week", with: "w")
+    }
+
+    private func parseBytes(_ str: String) -> Int64 {
+        let trimmed = str.trimmingCharacters(in: .whitespaces).uppercased()
+        let multipliers: [(String, Int64)] = [
+            ("TB", 1024 * 1024 * 1024 * 1024),
+            ("GB", 1024 * 1024 * 1024),
+            ("MB", 1024 * 1024),
+            ("KB", 1024),
+            ("B", 1)
+        ]
+
+        for (suffix, multiplier) in multipliers {
+            if trimmed.hasSuffix(suffix) {
+                let numPart = trimmed.dropLast(suffix.count).trimmingCharacters(in: .whitespaces)
+                if let num = Double(numPart) {
+                    return Int64(num * Double(multiplier))
+                }
+            }
+        }
+        return 0
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var value = Double(bytes)
+        var unitIndex = 0
+
+        while value >= 1024 && unitIndex < units.count - 1 {
+            value /= 1024
+            unitIndex += 1
+        }
+
+        if unitIndex == 0 {
+            return "\(Int(value)) \(units[unitIndex])"
+        } else {
+            return String(format: "%.1f %@", value, units[unitIndex])
+        }
     }
 
     private let dockerPaths = [
