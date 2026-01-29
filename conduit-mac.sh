@@ -71,6 +71,7 @@ readonly MAX_BANDWIDTH=1000     # Maximum bandwidth in Mbps
 # TERMINAL COLOR CODES
 # ==============================================================================
 readonly BOLD='\033[1m'
+readonly DIM='\033[2m'
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[0;33m'
