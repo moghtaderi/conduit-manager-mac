@@ -3193,14 +3193,25 @@ restart_single_container() {
     echo ""
     echo -e "${BLUE}Restarting ${name}...${NC}"
 
+    local result=""
     if container_running "$restart_choice"; then
-        docker restart "$name" >/dev/null 2>&1
+        result=$(docker restart "$name" 2>&1) || true
     else
-        docker start "$name" >/dev/null 2>&1
+        result=$(docker start "$name" 2>&1) || true
     fi
 
-    echo -e "${GREEN}✔ ${name} restarted.${NC}"
-    log_info "Restarted container $name"
+    # Check if container is now running
+    sleep 1
+    if container_running "$restart_choice"; then
+        echo -e "${GREEN}✔ ${name} started successfully.${NC}"
+        log_info "Restarted container $name"
+    else
+        echo -e "${RED}✘ Failed to start ${name}.${NC}"
+        if [ -n "$result" ]; then
+            echo -e "${RED}  Error: ${result}${NC}"
+        fi
+        log_error "Failed to restart container $name: $result"
+    fi
     sleep 2
 }
 
@@ -3269,9 +3280,21 @@ stop_single_container() {
 
     echo ""
     echo -e "${BLUE}Stopping ${name}...${NC}"
-    docker stop "$name" >/dev/null 2>&1
-    echo -e "${GREEN}✔ ${name} stopped.${NC}"
-    log_info "Stopped container $name"
+    local result=""
+    result=$(docker stop "$name" 2>&1) || true
+
+    # Check if container is now stopped
+    sleep 1
+    if ! container_running "$stop_choice"; then
+        echo -e "${GREEN}✔ ${name} stopped.${NC}"
+        log_info "Stopped container $name"
+    else
+        echo -e "${RED}✘ Failed to stop ${name}.${NC}"
+        if [ -n "$result" ]; then
+            echo -e "${RED}  Error: ${result}${NC}"
+        fi
+        log_error "Failed to stop container $name: $result"
+    fi
     sleep 2
 }
 
