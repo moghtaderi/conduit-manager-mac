@@ -66,26 +66,24 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 ## Menu Bar App
 
-Quick control without opening Terminal:
+Quick status view from your menu bar:
 
 ```
-┌─────────────────────────────┐
-│ ● Conduit: Running (2/2)    │
-│ Clients: 12 connected       │
-│ Traffic: ↑ 2.4 GB  ↓ 6.8 GB │
-├─────────────────────────────┤
-│ ▸ Per-Container Stats       │
-├─────────────────────────────┤
-│ ▶ Start All            ⌘S   │
-│ ■ Stop All             ⌘X   │
-│ ▸ ↻ Restart One...          │
-│ ▸ ■ Stop One...             │
-├─────────────────────────────┤
-│ Open Dashboard...      ⌘D   │
-│ Open Terminal Manager...    │
-├─────────────────────────────┤
-│ Quit                   ⌘Q   │
-└─────────────────────────────┘
+┌─────────────────────────────────┐
+│ ● Running (2/2 containers)      │
+│ 12 clients                      │
+│ ↑ 2.4 GB  ↓ 6.8 GB              │
+│ Limit: 300 clients / 50 Mbps    │
+├─────────────────────────────────┤
+│ ● conduit-mac: 5 clients        │
+│ ● conduit-mac-2: 7 clients      │
+├─────────────────────────────────┤
+│ Open Dashboard...          ⌘D   │
+│ Open Terminal...           ▸    │
+├─────────────────────────────────┤
+│ v2.1.0                          │
+│ Quit                       ⌘Q   │
+└─────────────────────────────────┘
 ```
 
 ### Dashboard Window
@@ -97,6 +95,7 @@ Click **Open Dashboard** (⌘D) for a full-featured window with:
 | **Node IDs** | View and copy Node IDs for each container |
 | **QR Codes** | Scan to claim rewards in the Ryve app |
 | **Live Stats** | Connected clients, traffic, uptime per container |
+| **Per-Container Controls** | Start, stop, restart individual containers |
 | **Logs View** | Filter by INFO, STATS, or ERRORS |
 | **Health Check** | Docker system status and container health |
 
@@ -278,23 +277,24 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 ## برنامه Menu Bar
 
-کنترل سریع بدون نیاز به Terminal:
+نمای سریع وضعیت از نوار منو:
 
 </div>
 
 ```
-┌─────────────────────────────┐
-│ ● Conduit: Running (2/2)    │
-│ Clients: 12 connected       │
-│ Traffic: ↑ 2.4 GB  ↓ 6.8 GB │
-├─────────────────────────────┤
-│ ▸ Per-Container Stats       │
-├─────────────────────────────┤
-│ ▶ Start All                 │
-│ ■ Stop All                  │
-│ ▸ ↻ Restart One...          │
-│ ▸ ■ Stop One...             │
-└─────────────────────────────┘
+┌─────────────────────────────────┐
+│ ● Running (2/2 containers)      │
+│ 12 clients                      │
+│ ↑ 2.4 GB  ↓ 6.8 GB              │
+├─────────────────────────────────┤
+│ ● conduit-mac: 5 clients        │
+│ ● conduit-mac-2: 7 clients      │
+├─────────────────────────────────┤
+│ Open Dashboard...          ⌘D   │
+│ Open Terminal...           ▸    │
+├─────────────────────────────────┤
+│ Quit                       ⌘Q   │
+└─────────────────────────────────┘
 ```
 
 <div dir="rtl">

@@ -898,7 +898,23 @@ restore_key() {
             return 1
         fi
 
-        backup_file="$custom_path"
+        # Security: Resolve to absolute path and validate it's a real file
+        local resolved_path
+        resolved_path=$(cd "$(dirname "$custom_path")" 2>/dev/null && pwd -P)/$(basename "$custom_path")
+        if [ ! -f "$resolved_path" ]; then
+            echo -e "${RED}Error: Invalid file path${NC}"
+            read -n 1 -s -r -p "Press any key to return..."
+            return 1
+        fi
+
+        # Security: Validate the file contains valid key JSON (not arbitrary file)
+        if ! grep -q '"privateKeyBase64"' "$resolved_path" 2>/dev/null; then
+            echo -e "${RED}Error: File is not a valid Conduit key backup${NC}"
+            read -n 1 -s -r -p "Press any key to return..."
+            return 1
+        fi
+
+        backup_file="$resolved_path"
     else
         # List available backups
         echo "Available backups:"
@@ -947,11 +963,21 @@ restore_key() {
     echo "Stopping ${target_name}..."
     docker stop "$target_name" 2>/dev/null || true
 
-    # Restore the key using a temporary container
-    # Also fix ownership to UID 1000 (conduit user inside container)
+    # Security: Read the backup file content directly instead of mounting the directory
+    # This prevents mounting arbitrary directories into Docker containers
     echo "Restoring key..."
-    if ! docker run --rm -v "$target_vol":/data -v "$(dirname "$backup_file")":/backup alpine \
-        sh -c "cp /backup/$(basename "$backup_file") /data/conduit_key.json && chmod 600 /data/conduit_key.json && chown -R 1000:1000 /data"; then
+    local key_content
+    key_content=$(cat "$backup_file" 2>/dev/null)
+    if [ -z "$key_content" ] || ! echo "$key_content" | grep -q '"privateKeyBase64"'; then
+        log_error "Failed to read backup file or invalid content"
+        echo -e "${RED}✘ Failed to restore key - invalid backup file${NC}"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
+
+    # Write the key content directly to the volume using a heredoc (no directory mount needed)
+    if ! echo "$key_content" | docker run --rm -i -v "$target_vol":/data alpine \
+        sh -c "cat > /data/conduit_key.json && chmod 600 /data/conduit_key.json && chown -R 1000:1000 /data"; then
         log_error "Failed to copy key to volume $target_vol"
         echo -e "${RED}✘ Failed to restore key - copy operation failed${NC}"
         read -n 1 -s -r -p "Press any key to return..."
@@ -1413,9 +1439,16 @@ install_new() {
     if [ -n "$restore_backup" ]; then
         echo -e "${BLUE}Restoring node identity from backup...${NC}"
         log_info "Restoring key from: $restore_backup"
-        docker run --rm -v "$VOLUME_NAME":/data -v "$(dirname "$restore_backup")":/backup alpine \
-            sh -c "cp /backup/$(basename "$restore_backup") /data/conduit_key.json && chmod 600 /data/conduit_key.json && chown -R 1000:1000 /data"
-        echo -e "${GREEN}✔ Node identity restored${NC}"
+        # Security: Read file content directly instead of mounting directory
+        local backup_content
+        backup_content=$(cat "$restore_backup" 2>/dev/null)
+        if [ -n "$backup_content" ] && echo "$backup_content" | grep -q '"privateKeyBase64"'; then
+            echo "$backup_content" | docker run --rm -i -v "$VOLUME_NAME":/data alpine \
+                sh -c "cat > /data/conduit_key.json && chmod 600 /data/conduit_key.json && chown -R 1000:1000 /data"
+            echo -e "${GREEN}✔ Node identity restored${NC}"
+        else
+            echo -e "${YELLOW}⚠ Could not restore backup - invalid file${NC}"
+        fi
     fi
 
     # --------------------------------------------------------------------------
@@ -2570,7 +2603,27 @@ check_for_updates() {
         return 1
     fi
 
-    echo -e "${GREEN}✔ Download verified${NC}"
+    # Verify the script contains expected identifiers (anti-tampering check)
+    if ! grep -q "PSIPHON CONDUIT MANAGER" "$temp_script" 2>/dev/null; then
+        echo -e "${RED}✘ Downloaded file does not appear to be the Conduit Manager script${NC}"
+        rm -f "$temp_script" 2>/dev/null
+        log_error "Auto-update verification failed - content mismatch"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
+
+    # Verify the script has the expected version header (version should match remote_version)
+    local downloaded_version=""
+    downloaded_version=$(grep "^readonly VERSION=" "$temp_script" | head -1 | cut -d'"' -f2)
+    if [ "$downloaded_version" != "$remote_version" ]; then
+        echo -e "${RED}✘ Downloaded version mismatch (expected $remote_version, got $downloaded_version)${NC}"
+        rm -f "$temp_script" 2>/dev/null
+        log_error "Auto-update verification failed - version mismatch"
+        read -n 1 -s -r -p "Press any key to return..."
+        return 1
+    fi
+
+    echo -e "${GREEN}✔ Download verified (v${downloaded_version})${NC}"
     echo ""
 
     # Replace the current script
@@ -2608,12 +2661,18 @@ check_for_updates() {
                 extracted_app=$(find "$temp_extract_dir" -name "Conduit-Mac.app" -type d 2>/dev/null | head -1)
 
                 if [ -n "$extracted_app" ] && [ -d "$extracted_app" ]; then
-                    # Remove old app if it exists
-                    local install_path="${HOME}/conduit-manager/Conduit-Mac.app"
-                    rm -rf "$install_path" 2>/dev/null
+                    # Verify the app bundle structure (anti-tampering check)
+                    if [ ! -f "$extracted_app/Contents/MacOS/Conduit-Mac" ] || \
+                       [ ! -f "$extracted_app/Contents/Info.plist" ]; then
+                        echo -e "${YELLOW}⚠ Menu Bar App bundle appears invalid (script updated OK)${NC}"
+                        log_warn "Menu Bar App verification failed - invalid bundle structure"
+                    else
+                        # Remove old app if it exists
+                        local install_path="${HOME}/conduit-manager/Conduit-Mac.app"
+                        rm -rf "$install_path" 2>/dev/null
 
-                    # Move new app into place
-                    if mv "$extracted_app" "$install_path" 2>/dev/null; then
+                        # Move new app into place
+                        if mv "$extracted_app" "$install_path" 2>/dev/null; then
                         # Clear quarantine attribute so macOS allows it to run
                         xattr -rd com.apple.quarantine "$install_path" 2>/dev/null
                         echo -e "${GREEN}✔ Menu Bar App updated${NC}"
@@ -2627,6 +2686,7 @@ check_for_updates() {
                     else
                         echo -e "${YELLOW}⚠ Could not install Menu Bar App (script updated OK)${NC}"
                         log_warn "Menu Bar App install failed - could not move to destination"
+                    fi
                     fi
                 else
                     echo -e "${YELLOW}⚠ Menu Bar App not found in download (script updated OK)${NC}"

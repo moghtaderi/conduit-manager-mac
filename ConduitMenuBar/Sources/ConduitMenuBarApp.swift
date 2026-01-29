@@ -397,12 +397,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Escape the path to prevent AppleScript injection
+        // Must escape backslashes first, then double quotes
+        let escapedPath = path
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+
         let script: String
         switch app {
         case .terminal:
             script = """
                 tell application "Terminal"
-                    do script "\(path)"
+                    do script "\(escapedPath)"
                     activate
                 end tell
                 """
@@ -411,7 +417,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 tell application "iTerm"
                     create window with default profile
                     tell current session of current window
-                        write text "\(path)"
+                        write text "\(escapedPath)"
                     end tell
                     activate
                 end tell
@@ -1174,7 +1180,7 @@ struct ContainerRow: View {
                         .foregroundColor(.gray.opacity(0.7))
                         .help("Show QR Code")
                         .popover(isPresented: $showQRCode) {
-                            QRCodeView(nodeId: stat.nodeId, privateKey: stat.privateKey, containerName: stat.name)
+                            QRCodeView(nodeId: stat.nodeId, containerName: stat.name, manager: manager)
                         }
                     }
                     Spacer()
@@ -1212,17 +1218,11 @@ struct IconButtonStyle: ButtonStyle {
 
 struct QRCodeView: View {
     let nodeId: String
-    let privateKey: String
     let containerName: String
+    let manager: ConduitManager
 
-    /// Generate the Ryve claim URL matching the CLI format
-    private var claimUrl: String {
-        // JSON format: {"version":1,"data":{"key":"PRIVATE_KEY","name":"NODE_NAME"}}
-        let jsonData = "{\"version\":1,\"data\":{\"key\":\"\(privateKey)\",\"name\":\"\(containerName)\"}}"
-        let b64Data = Data(jsonData.utf8).base64EncodedString()
-            .replacingOccurrences(of: "\n", with: "")
-        return "network.ryve.app://(app)/conduits?claim=\(b64Data)"
-    }
+    @State private var privateKey: String = ""
+    @State private var isLoading = true
 
     var body: some View {
         VStack(spacing: 12) {
@@ -1234,7 +1234,10 @@ struct QRCodeView: View {
                 .font(.system(size: 10))
                 .foregroundColor(.gray)
 
-            if let qrImage = generateQRCode(from: claimUrl) {
+            if isLoading {
+                ProgressView()
+                    .frame(width: 150, height: 150)
+            } else if let qrImage = generateQRCode() {
                 Image(nsImage: qrImage)
                     .interpolation(.none)
                     .resizable()
@@ -1255,6 +1258,20 @@ struct QRCodeView: View {
         .padding(16)
         .background(Color(red: 0.15, green: 0.15, blue: 0.18))
         .preferredColorScheme(.dark)
+        .onAppear {
+            // Fetch private key on-demand when QR popover opens
+            DispatchQueue.global(qos: .userInitiated).async {
+                let key = manager.fetchPrivateKey(for: containerName)
+                DispatchQueue.main.async {
+                    privateKey = key
+                    isLoading = false
+                }
+            }
+        }
+        .onDisappear {
+            // Clear sensitive data when popover closes
+            privateKey = ""
+        }
     }
 
     private var truncatedNodeId: String {
@@ -1262,8 +1279,20 @@ struct QRCodeView: View {
         return "\(nodeId.prefix(8))...\(nodeId.suffix(8))"
     }
 
-    private func generateQRCode(from string: String) -> NSImage? {
-        guard let data = string.data(using: .utf8),
+    /// Generate the Ryve claim URL matching the CLI format
+    private func generateClaimUrl() -> String {
+        // JSON format: {"version":1,"data":{"key":"PRIVATE_KEY","name":"NODE_NAME"}}
+        let jsonData = "{\"version\":1,\"data\":{\"key\":\"\(privateKey)\",\"name\":\"\(containerName)\"}}"
+        let b64Data = Data(jsonData.utf8).base64EncodedString()
+            .replacingOccurrences(of: "\n", with: "")
+        return "network.ryve.app://(app)/conduits?claim=\(b64Data)"
+    }
+
+    private func generateQRCode() -> NSImage? {
+        guard !privateKey.isEmpty else { return nil }
+
+        let claimUrl = generateClaimUrl()
+        guard let data = claimUrl.data(using: .utf8),
               let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
 
         filter.setValue(data, forKey: "inputMessage")
@@ -1393,7 +1422,8 @@ struct ContainerStats {
     let down: String
     let uptime: String
     let nodeId: String      // Derived Node ID (for display)
-    let privateKey: String  // Full private key base64 (for QR code claim URL)
+    // Note: privateKey is fetched on-demand via ConduitManager.fetchPrivateKey(for:)
+    // to minimize time sensitive data is held in memory
 }
 
 // MARK: - Conduit Manager
@@ -1529,8 +1559,8 @@ class ConduitManager {
                 }
             }
 
-            // Fetch Node ID and private key from volume
-            let (nodeId, privateKey) = fetchNodeIdAndKey(for: name)
+            // Fetch Node ID from volume (private key fetched on-demand for QR codes)
+            let (nodeId, _) = fetchNodeIdAndKey(for: name)
 
             return ContainerStats(
                 index: index,
@@ -1541,10 +1571,15 @@ class ConduitManager {
                 up: up,
                 down: down,
                 uptime: uptime,
-                nodeId: nodeId,
-                privateKey: privateKey
+                nodeId: nodeId
             )
         }
+    }
+
+    /// Fetch private key on-demand for QR code generation (minimizes time in memory)
+    func fetchPrivateKey(for container: String) -> String {
+        let (_, privateKey) = fetchNodeIdAndKey(for: container)
+        return privateKey
     }
 
     /// Fetch Node ID and private key from conduit_key.json in Docker volume
@@ -1617,8 +1652,7 @@ class ConduitManager {
                 up: "-",
                 down: "-",
                 uptime: "-",
-                nodeId: "",
-                privateKey: ""
+                nodeId: ""
             )
         }
     }
