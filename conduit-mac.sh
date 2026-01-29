@@ -3672,12 +3672,11 @@ while true; do
                     2)
                         echo ""
                         echo "Select container to reconfigure:"
-                        local i=1
-                        while [ $i -le "$CONTAINER_COUNT" ]; do
-                            local name
-                            name=$(get_container_name "$i")
-                            echo "  ${i}. ${name}"
-                            i=$((i + 1))
+                        reconfig_i=1
+                        while [ $reconfig_i -le "$CONTAINER_COUNT" ]; do
+                            reconfig_name=$(get_container_name "$reconfig_i")
+                            echo "  ${reconfig_i}. ${reconfig_name}"
+                            reconfig_i=$((reconfig_i + 1))
                         done
                         echo ""
                         read -p "Container number [1-$CONTAINER_COUNT]: " container_choice
