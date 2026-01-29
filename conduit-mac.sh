@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="2.0.2"                                          # Script version
+readonly VERSION="2.0.3"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -334,6 +334,9 @@ SAVED_MAX_CPUS="$MAX_CPUS"
 
 # Multi-Container Settings
 SAVED_CONTAINER_COUNT="$CONTAINER_COUNT"
+
+# Node Name for Rewards
+SAVED_NODE_NAME="${SAVED_NODE_NAME:-}"
 EOF
     chmod 600 "$CONFIG_FILE"
 }
@@ -2655,31 +2658,117 @@ generate_claim_link() {
     echo -e "${CYAN}═══ 🎁 CLAIM NODE REWARDS ═══${NC}"
     echo ""
 
+    # Determine which container(s) to generate claim for
+    local target_index=1
+    local target_vol=""
+
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        echo "  Select container to claim rewards for:"
+        echo ""
+
+        local i=1
+        while [ $i -le "$CONTAINER_COUNT" ]; do
+            local name
+            name=$(get_container_name "$i")
+            local node_id=""
+            node_id=$(get_node_id "$i")
+            if [ -n "$node_id" ]; then
+                local short_id="${node_id:0:12}..."
+                printf "  %d. %-18s (ID: %s)\n" "$i" "$name" "$short_id"
+            else
+                printf "  %d. %-18s (no key yet)\n" "$i" "$name"
+            fi
+            i=$((i + 1))
+        done
+
+        echo ""
+        echo "  a. All containers (generate QR for each)"
+        echo "  0. Cancel"
+        echo ""
+        read -p " Select: " claim_choice < /dev/tty
+
+        if [ "$claim_choice" = "0" ] || [ -z "$claim_choice" ]; then
+            return
+        fi
+
+        if [ "$claim_choice" = "a" ] || [ "$claim_choice" = "A" ]; then
+            # Generate for all containers
+            generate_claim_all
+            return
+        fi
+
+        # Validate input
+        if ! echo "$claim_choice" | grep -qE '^[0-9]+$'; then
+            echo -e "${RED}Invalid selection.${NC}"
+            sleep 1
+            return
+        fi
+
+        if [ "$claim_choice" -lt 1 ] || [ "$claim_choice" -gt "$CONTAINER_COUNT" ]; then
+            echo -e "${RED}Invalid container number.${NC}"
+            sleep 1
+            return
+        fi
+
+        target_index="$claim_choice"
+    fi
+
+    target_vol=$(get_volume_name "$target_index")
+    local container_name
+    container_name=$(get_container_name "$target_index")
+
     # 1. Get Private Key from Docker volume
-    local key_val=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null | grep "privateKeyBase64" | awk -F'"' '{print $4}')
+    local key_val=""
+    key_val=$(docker run --rm -v "$target_vol":/data alpine cat /data/conduit_key.json 2>/dev/null | grep "privateKeyBase64" | awk -F'"' '{print $4}') || key_val=""
 
     if [ -z "$key_val" ]; then
-        echo -e "${RED}Error: Could not retrieve private key.${NC}"
-        echo "Make sure Conduit is installed and has started at least once."
+        echo -e "${RED}Error: Could not retrieve private key for ${container_name}.${NC}"
+        echo "Make sure the container has started at least once."
         read -n 1 -s -r -p "Press any key to return..." < /dev/tty
         return 1
     fi
 
-    # 2. Get Node Name from user
-    echo -e "Enter a name for this node to display in the Ryve app."
-    echo -e "Default: ${GREEN}My Conduit Node${NC}"
-    echo ""
-    read -p "Node Name: " input_name < /dev/tty
-    local node_name="${input_name:-My Conduit Node}"
+    # 2. Get Node Name - use saved name or prompt once
+    local node_name=""
+    if [ -n "${SAVED_NODE_NAME:-}" ]; then
+        # Use saved name, append container number if multiple
+        if [ "$CONTAINER_COUNT" -gt 1 ]; then
+            node_name="${SAVED_NODE_NAME} #${target_index}"
+        else
+            node_name="$SAVED_NODE_NAME"
+        fi
+        echo -e "Using saved node name: ${GREEN}${node_name}${NC}"
+    else
+        echo ""
+        echo -e "Enter a base name for your node(s) in the Ryve app."
+        if [ "$CONTAINER_COUNT" -gt 1 ]; then
+            echo -e "(Container number will be appended automatically)"
+        fi
+        echo -e "Default: ${GREEN}My Conduit Node${NC}"
+        echo ""
+        read -p "Node Name: " input_name < /dev/tty
+        local base_name="${input_name:-My Conduit Node}"
+
+        # Save for future use
+        SAVED_NODE_NAME="$base_name"
+        save_config
+
+        if [ "$CONTAINER_COUNT" -gt 1 ]; then
+            node_name="${base_name} #${target_index}"
+        else
+            node_name="$base_name"
+        fi
+    fi
 
     # 3. Construct JSON & Encode to base64
     local json_data="{\"version\":1,\"data\":{\"key\":\"$key_val\",\"name\":\"$node_name\"}}"
-    local b64_data=$(echo -n "$json_data" | base64 | tr -d '\n')
+    local b64_data=""
+    b64_data=$(echo -n "$json_data" | base64 | tr -d '\n')
     local claim_url="network.ryve.app://(app)/conduits?claim=$b64_data"
 
     echo ""
-    echo -e "${GREEN}✔ Claim Link Generated:${NC}"
-    echo -e "${YELLOW}$claim_url${NC}"
+    echo -e "${GREEN}✔ Claim Link Generated for ${container_name}:${NC}"
+    echo -e "${DIM}${claim_url}${NC}"
     echo ""
 
     # 4. Check & Install qrencode if missing
@@ -2704,6 +2793,93 @@ generate_claim_link() {
         echo -e "${YELLOW}Could not display QR Code.${NC}"
         echo "Please copy the link above manually."
     fi
+
+    echo ""
+    read -n 1 -s -r -p "Press any key to return..." < /dev/tty
+}
+
+# generate_claim_all: Generate claim links for all containers
+generate_claim_all() {
+    print_header
+    echo -e "${CYAN}═══ 🎁 CLAIM ALL NODE REWARDS ═══${NC}"
+    echo ""
+
+    # Get base name first
+    local base_name=""
+    if [ -n "${SAVED_NODE_NAME:-}" ]; then
+        base_name="$SAVED_NODE_NAME"
+        echo -e "Using saved node name: ${GREEN}${base_name}${NC}"
+    else
+        echo -e "Enter a base name for your nodes in the Ryve app."
+        echo -e "(Container number will be appended: 'Name #1', 'Name #2', etc.)"
+        echo -e "Default: ${GREEN}My Conduit Node${NC}"
+        echo ""
+        read -p "Node Name: " input_name < /dev/tty
+        base_name="${input_name:-My Conduit Node}"
+
+        # Save for future use
+        SAVED_NODE_NAME="$base_name"
+        save_config
+    fi
+
+    # Check qrencode availability
+    local has_qr=false
+    if command -v qrencode >/dev/null 2>&1; then
+        has_qr=true
+    else
+        echo ""
+        echo -e "${YELLOW}QR Code tool (qrencode) is missing.${NC}"
+        if command -v brew >/dev/null 2>&1; then
+            echo -e "${BLUE}Attempting to install qrencode via Homebrew...${NC}"
+            if brew install qrencode 2>/dev/null; then
+                has_qr=true
+            fi
+        fi
+    fi
+
+    echo ""
+
+    # Generate for each container
+    local i=1
+    while [ $i -le "$CONTAINER_COUNT" ]; do
+        local container_name
+        local vol
+        container_name=$(get_container_name "$i")
+        vol=$(get_volume_name "$i")
+
+        local key_val=""
+        key_val=$(docker run --rm -v "$vol":/data alpine cat /data/conduit_key.json 2>/dev/null | grep "privateKeyBase64" | awk -F'"' '{print $4}') || key_val=""
+
+        echo -e "${BOLD}── ${container_name} ──${NC}"
+
+        if [ -z "$key_val" ]; then
+            echo -e "${YELLOW}  No key found (container may not have started yet)${NC}"
+            echo ""
+        else
+            local node_name="${base_name} #${i}"
+            local json_data="{\"version\":1,\"data\":{\"key\":\"$key_val\",\"name\":\"$node_name\"}}"
+            local b64_data=""
+            b64_data=$(echo -n "$json_data" | base64 | tr -d '\n')
+            local claim_url="network.ryve.app://(app)/conduits?claim=$b64_data"
+
+            if [ "$has_qr" = true ]; then
+                echo ""
+                echo -n "$claim_url" | qrencode -t UTF8
+            else
+                echo -e "  Link: ${DIM}${claim_url}${NC}"
+            fi
+            echo ""
+        fi
+
+        i=$((i + 1))
+
+        # Pause between containers if multiple
+        if [ $i -le "$CONTAINER_COUNT" ]; then
+            read -n 1 -s -r -p "Press any key for next container..." < /dev/tty
+            echo ""
+            echo ""
+        fi
+    done
 
     echo ""
     read -n 1 -s -r -p "Press any key to return..." < /dev/tty

@@ -36,7 +36,7 @@ enum TerminalApp: String, CaseIterable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "2.0.2"
+    private let version = "2.0.3"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
@@ -327,29 +327,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         for stat in containerStats {
             let statusIcon = stat.running ? "●" : "○"
-            let statusColor = stat.running ? "Running" : "Stopped"
+            let statusText = stat.running ? "Running" : "Stopped"
+            let statusColor: NSColor = stat.running ? .systemGreen : .secondaryLabelColor
 
-            // Container header
-            let headerItem = NSMenuItem(title: "\(statusIcon) \(stat.name) (\(statusColor))", action: nil, keyEquivalent: "")
-            headerItem.isEnabled = false
+            // Container header with custom view to avoid grey appearance
+            let headerItem = submenuInfoItem("\(statusIcon) \(stat.name) (\(statusText))", color: statusColor, bold: true)
             submenu.addItem(headerItem)
 
             if stat.running {
                 // Stats for this container
                 let clientText = stat.connecting > 0
-                    ? "   Clients: \(stat.connected) (\(stat.connecting) connecting)"
-                    : "   Clients: \(stat.connected)"
-                let clientItem = NSMenuItem(title: clientText, action: nil, keyEquivalent: "")
-                clientItem.isEnabled = false
-                submenu.addItem(clientItem)
-
-                let trafficItem = NSMenuItem(title: "   Traffic: ↑ \(stat.up)  ↓ \(stat.down)", action: nil, keyEquivalent: "")
-                trafficItem.isEnabled = false
-                submenu.addItem(trafficItem)
-
-                let uptimeItem = NSMenuItem(title: "   Uptime: \(stat.uptime)", action: nil, keyEquivalent: "")
-                uptimeItem.isEnabled = false
-                submenu.addItem(uptimeItem)
+                    ? "Clients: \(stat.connected) (\(stat.connecting) connecting)"
+                    : "Clients: \(stat.connected)"
+                submenu.addItem(submenuInfoItem(clientText))
+                submenu.addItem(submenuInfoItem("Traffic: ↑ \(stat.up)  ↓ \(stat.down)"))
+                submenu.addItem(submenuInfoItem("Uptime: \(stat.uptime)"))
             }
 
             submenu.addItem(.separator())
@@ -359,6 +351,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if submenu.items.last?.isSeparatorItem == true {
             submenu.removeItem(at: submenu.items.count - 1)
         }
+    }
+
+    /// Creates a non-clickable submenu item with custom view (not greyed out)
+    private func submenuInfoItem(_ title: String, color: NSColor = .labelColor, bold: Bool = false) -> NSMenuItem {
+        let item = NSMenuItem()
+
+        let label = NSTextField(labelWithString: title)
+        label.font = bold ? .boldSystemFont(ofSize: 13) : .menuFont(ofSize: 13)
+        label.textColor = color
+        label.frame = NSRect(x: 8, y: 0, width: 260, height: 18)
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 18))
+        container.addSubview(label)
+        item.view = container
+
+        return item
     }
 
     private func updatePerContainerControls(menu: NSMenu, docker: DockerStatus) {
