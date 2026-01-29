@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="2.0.5"                                          # Script version
+readonly VERSION="2.0.6"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -1741,15 +1741,27 @@ view_dashboard() {
                 down=$(echo "$log_line" | sed -n 's/.*Down:[[:space:]]*\([^|]*\).*/\1/p' | tr -d ' ') || down="0B"
             fi
 
-            # Get bandwidth setting from primary container
-            local container_args=""
+            # Get cumulative bandwidth setting from all containers
+            local total_bandwidth=0
+            local has_unlimited=false
             local container_bandwidth=""
-            container_args=$(docker inspect --format='{{.Args}}' "$CONTAINER_NAME" 2>/dev/null) || container_args=""
-            container_bandwidth=$(echo "$container_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || container_bandwidth=""
-            if [ "$container_bandwidth" = "-1" ]; then
+            local bw_i=1
+            while [ $bw_i -le "$CONTAINER_COUNT" ]; do
+                local bw_name bw_args bw_val
+                bw_name=$(get_container_name "$bw_i")
+                bw_args=$(docker inspect --format='{{.Args}}' "$bw_name" 2>/dev/null) || bw_args=""
+                bw_val=$(echo "$bw_args" | grep -o '\-\-bandwidth [0-9-]*' | awk '{print $2}') || bw_val=""
+                if [ "$bw_val" = "-1" ]; then
+                    has_unlimited=true
+                elif [ -n "$bw_val" ] && [ "$bw_val" -gt 0 ] 2>/dev/null; then
+                    total_bandwidth=$((total_bandwidth + bw_val))
+                fi
+                bw_i=$((bw_i + 1))
+            done
+            if [ "$has_unlimited" = true ]; then
                 container_bandwidth="Unlimited"
-            elif [ -n "$container_bandwidth" ]; then
-                container_bandwidth="${container_bandwidth} Mbps"
+            elif [ "$total_bandwidth" -gt 0 ]; then
+                container_bandwidth="${total_bandwidth} Mbps"
             else
                 container_bandwidth="N/A"
             fi

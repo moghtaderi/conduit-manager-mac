@@ -36,7 +36,7 @@ enum TerminalApp: String, CaseIterable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "2.0.5"
+    private let version = "2.0.6"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
@@ -77,7 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(infoItem("", tag: 101, hidden: true))  // Docker helper message
         menu.addItem(infoItem("Clients: -", tag: 102))
         menu.addItem(infoItem("Traffic: -", tag: 103))
-        // Uptime removed from main view - shown per-container in submenu only
+        menu.addItem(infoItem("Health: -", tag: 105, hidden: true))  // Health indicator
         menu.addItem(.separator())
 
         // Per-container stats section (hidden by default, shown when multiple containers)
@@ -282,12 +282,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatsItems(menu: NSMenu, running: Bool, docker: DockerStatus) {
-        // Clients (102) - aggregated total
+        // Clients (102) - aggregated total with smart formatting
         if let item = menu.item(withTag: 102) {
             if running, let stats = manager?.stats {
+                let connectedStr = formatLargeNumber(stats.connected)
                 let text = stats.connecting > 0
-                    ? "Clients: \(stats.connected) connected (\(stats.connecting) connecting)"
-                    : "Clients: \(stats.connected) connected"
+                    ? "Clients: \(connectedStr) connected (\(stats.connecting) connecting)"
+                    : "Clients: \(connectedStr) connected"
                 updateInfo(item, text)
             } else {
                 updateInfo(item, "Clients: -")
@@ -304,7 +305,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             item.isHidden = docker != .running
         }
-        // Uptime removed from main view - shown per-container in submenu only
+
+        // Health (105) - shows overall system health with colored indicator
+        if let item = menu.item(withTag: 105) {
+            if running, let manager = manager {
+                let health = manager.healthStatus
+                updateInfo(item, "Health: \(health.icon) \(health.description)", health.color)
+                item.isHidden = false
+            } else {
+                item.isHidden = true
+            }
+        }
+    }
+
+    /// Formats large numbers: 1234 → "1.2K", 1234567 → "1.2M"
+    private func formatLargeNumber(_ num: Int) -> String {
+        if num >= 1_000_000 {
+            return String(format: "%.1fM", Double(num) / 1_000_000)
+        } else if num >= 1_000 {
+            return String(format: "%.1fK", Double(num) / 1_000)
+        }
+        return "\(num)"
     }
 
     private func updatePerContainerStats(menu: NSMenu, docker: DockerStatus) {
@@ -762,6 +783,58 @@ class ConduitManager {
         return formatUptime(String(status.dropFirst(3)))
     }
 
+    /// Health status for the overall system
+    enum HealthStatus {
+        case healthy      // All containers running, getting connections
+        case degraded     // Some containers stopped or no recent connections
+        case unhealthy    // All containers stopped or major issues
+        case unknown      // Can't determine
+
+        var icon: String {
+            switch self {
+            case .healthy: return "●"
+            case .degraded: return "◐"
+            case .unhealthy: return "○"
+            case .unknown: return "○"
+            }
+        }
+
+        var color: NSColor {
+            switch self {
+            case .healthy: return .systemGreen
+            case .degraded: return .systemYellow
+            case .unhealthy: return .systemRed
+            case .unknown: return .secondaryLabelColor
+            }
+        }
+
+        var description: String {
+            switch self {
+            case .healthy: return "Healthy"
+            case .degraded: return "Degraded"
+            case .unhealthy: return "Unhealthy"
+            case .unknown: return "Unknown"
+            }
+        }
+    }
+
+    var healthStatus: HealthStatus {
+        let configured = configuredContainers
+        let running = runningContainers
+
+        guard !configured.isEmpty else { return .unknown }
+
+        // No containers running = unhealthy
+        if running.isEmpty { return .unhealthy }
+
+        // Some containers stopped = degraded
+        if running.count < configured.count { return .degraded }
+
+        // All containers running = healthy
+        // (we could check for activity, but no clients is normal for new nodes)
+        return .healthy
+    }
+
     var config: (maxClients: String, bandwidth: String)? {
         // Aggregate max clients and bandwidth from all containers
         let configured = configuredContainers
@@ -879,6 +952,18 @@ class ConduitManager {
         } else {
             return String(format: "%.1f %@", value, units[unitIndex])
         }
+    }
+
+    /// Formats large numbers nicely: 1234 → "1.2K", 1234567 → "1.2M"
+    private func formatNumber(_ num: Int) -> String {
+        if num >= 1_000_000 {
+            return String(format: "%.1fM", Double(num) / 1_000_000)
+        } else if num >= 10_000 {
+            return String(format: "%.1fK", Double(num) / 1_000)
+        } else if num >= 1_000 {
+            return String(format: "%.1fK", Double(num) / 1_000)
+        }
+        return "\(num)"
     }
 
     private let dockerPaths = [
