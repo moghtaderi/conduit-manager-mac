@@ -36,11 +36,12 @@ enum TerminalApp: String, CaseIterable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "2.0.6"
+    private let version = "2.1.0"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
     private var isUpdating = false  // Prevent concurrent updates
+    private var dashboardWindow: DashboardWindowController?
 
     private var preferredTerminal: TerminalApp {
         get {
@@ -59,6 +60,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         manager = ConduitManager()
+
+        // Set initial icon immediately (before async update)
+        setInitialIcon()
+
         setupMenu()
 
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -67,78 +72,64 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatus()
     }
 
+    /// Sets a placeholder icon immediately so the menu bar item is visible
+    private func setInitialIcon() {
+        guard let button = statusItem?.button else { return }
+        if let image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: "Conduit") {
+            let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+            if let configured = image.withSymbolConfiguration(config) {
+                configured.isTemplate = true
+                button.image = configured
+            }
+        }
+    }
+
     // MARK: Menu Setup
 
     private func setupMenu() {
         let menu = NSMenu()
 
-        // Status section
+        // Status header
         menu.addItem(infoItem("○ Conduit: Checking...", tag: 100))
         menu.addItem(infoItem("", tag: 101, hidden: true))  // Docker helper message
+        menu.addItem(.separator())
+
+        // Aggregated stats
         menu.addItem(infoItem("Clients: -", tag: 102))
         menu.addItem(infoItem("Traffic: -", tag: 103))
-        menu.addItem(infoItem("Health: -", tag: 105, hidden: true))  // Health indicator
+        menu.addItem(infoItem("Limit: -", tag: 401))
         menu.addItem(.separator())
 
-        // Per-container stats section (hidden by default, shown when multiple containers)
-        // Tag 500-504 reserved for container stats items (dynamically created)
-        let containerStatsItem = NSMenuItem(title: "Per-Container Stats", action: nil, keyEquivalent: "")
-        containerStatsItem.tag = 500
-        containerStatsItem.isHidden = true
-        let containerStatsSubmenu = NSMenu()
-        containerStatsItem.submenu = containerStatsSubmenu
-        menu.addItem(containerStatsItem)
-        menu.addItem(NSMenuItem.separator())
+        // Per-container stats (shown when multiple containers)
+        for i in 1...5 {
+            menu.addItem(infoItem("", tag: 600 + i, hidden: true))  // Container stats
+        }
+        let containerSeparator = NSMenuItem.separator()
+        containerSeparator.tag = 650
+        containerSeparator.isHidden = true
+        menu.addItem(containerSeparator)
 
-        // Controls
-        menu.addItem(actionItem("▶ Start All", action: #selector(startConduit), key: "s", tag: 200))
-        menu.addItem(actionItem("■ Stop All", action: #selector(stopConduit), key: "x", tag: 201))
+        // Actions
+        menu.addItem(actionItem("Open Dashboard...", action: #selector(openDashboard), key: "d", tag: 310))
 
-        // Per-container control submenu (hidden when single container)
-        let restartOneItem = NSMenuItem(title: "↻ Restart One...", action: nil, keyEquivalent: "")
-        restartOneItem.tag = 210
-        restartOneItem.isHidden = true
-        restartOneItem.submenu = NSMenu()
-        menu.addItem(restartOneItem)
-
-        let stopOneItem = NSMenuItem(title: "■ Stop One...", action: nil, keyEquivalent: "")
-        stopOneItem.tag = 211
-        stopOneItem.isHidden = true
-        stopOneItem.submenu = NSMenu()
-        menu.addItem(stopOneItem)
-
-        menu.addItem(.separator())
-
-        // Utilities
-        menu.addItem(actionItem("Download Docker Desktop...", action: #selector(openDockerDownload), tag: 300, hidden: true))
-
-        // Main terminal action - opens in default terminal
-        menu.addItem(actionItem("Open Terminal Manager...", action: #selector(openTerminalDefault), key: "t", tag: 305))
-
-        // Terminal preference submenu
-        let terminalPrefItem = NSMenuItem(title: "Terminal App", action: nil, keyEquivalent: "")
-        let terminalSubmenu = NSMenu()
+        // Terminal submenu
+        let terminalItem = NSMenuItem(title: "Open Terminal...", action: nil, keyEquivalent: "t")
+        terminalItem.tag = 305
+        let terminalMenu = NSMenu()
         for app in TerminalApp.allCases where app.isInstalled {
-            let item = NSMenuItem(title: app.rawValue, action: #selector(setTerminalPreference(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: app.rawValue, action: #selector(selectTerminal(_:)), keyEquivalent: "")
             item.representedObject = app
             item.state = (app == preferredTerminal) ? .on : .off
-            terminalSubmenu.addItem(item)
+            terminalMenu.addItem(item)
         }
-        terminalPrefItem.submenu = terminalSubmenu
-        terminalPrefItem.tag = 306
-        menu.addItem(terminalPrefItem)
+        terminalItem.submenu = terminalMenu
+        menu.addItem(terminalItem)
 
-        let scriptPath = findScript() ?? "~/conduit-manager/conduit-mac.sh"
-        menu.addItem(actionItem("Path: \(scriptPath)", action: #selector(copyPath), tag: 301))
-        menu.addItem(.separator())
-
-        // Config info
-        menu.addItem(infoItem("Max Clients: -", tag: 401))
-        menu.addItem(infoItem("Bandwidth: -", tag: 402))
+        menu.addItem(actionItem("Download Docker Desktop...", action: #selector(openDockerDownload), tag: 300, hidden: true))
         menu.addItem(.separator())
 
         // Footer
-        let versionItem = NSMenuItem(title: "Version \(version)", action: nil, keyEquivalent: "")
+        let versionItem = NSMenuItem(title: "v\(version)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)
         menu.addItem(actionItem("Quit", action: #selector(quitApp), key: "q"))
@@ -172,11 +163,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    /// Updates an info item's label text and color
-    private func updateInfo(_ item: NSMenuItem, _ title: String, _ color: NSColor = .labelColor) {
+    /// Updates an info item's label text and optional prefix icon color
+    private func updateInfo(_ item: NSMenuItem, _ title: String, prefixColor: NSColor? = nil) {
         guard let label = item.view?.subviews.first as? NSTextField else { return }
-        label.stringValue = title
-        label.textColor = color
+
+        if let color = prefixColor, title.count > 1 {
+            // Use attributed string for colored prefix (first character)
+            let attributed = NSMutableAttributedString(string: title)
+            attributed.addAttribute(.foregroundColor, value: color, range: NSRange(location: 0, length: 1))
+            attributed.addAttribute(.foregroundColor, value: NSColor.labelColor, range: NSRange(location: 1, length: title.count - 1))
+            label.attributedStringValue = attributed
+        } else {
+            label.stringValue = title
+            label.textColor = .labelColor
+        }
     }
 
     // MARK: Status Updates
@@ -185,13 +185,52 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Prevent concurrent updates if previous one is still running
         guard !isUpdating else { return }
         isUpdating = true
-        defer { isUpdating = false }
 
-        guard let manager = manager, let menu = statusItem?.menu else { return }
+        // Run Docker commands on background thread to avoid blocking UI
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self, let manager = self.manager else {
+                DispatchQueue.main.async { self?.isUpdating = false }
+                return
+            }
 
-        let docker = manager.dockerStatus
-        let running = docker == .running && manager.isRunning
-        let count = manager.containerCount
+            // Gather all data on background thread
+            let docker = manager.dockerStatus
+            let running = docker == .running && manager.isRunning
+            let count = manager.containerCount
+            let stats = manager.stats
+            let traffic = manager.traffic
+            let health = manager.healthStatus
+            let containerStats = manager.perContainerStats
+            let config = docker == .running ? manager.config : nil
+
+            // Update UI on main thread
+            DispatchQueue.main.async { [weak self] in
+                self?.applyStatusUpdate(
+                    docker: docker,
+                    running: running,
+                    count: count,
+                    stats: stats,
+                    traffic: traffic,
+                    health: health,
+                    containerStats: containerStats,
+                    config: config
+                )
+                self?.isUpdating = false
+            }
+        }
+    }
+
+    private func applyStatusUpdate(
+        docker: DockerStatus,
+        running: Bool,
+        count: (running: Int, total: Int),
+        stats: (connected: Int, connecting: Int)?,
+        traffic: (up: String, down: String)?,
+        health: ConduitManager.HealthStatus,
+        containerStats: [ContainerStats],
+        config: (maxClients: String, bandwidth: String)?
+    ) {
+        guard let menu = statusItem?.menu else { return }
 
         // Update icon
         updateIcon(docker: docker, running: running)
@@ -199,17 +238,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Status line (100)
         if let item = menu.item(withTag: 100) {
             switch docker {
-            case .notInstalled: updateInfo(item, "⚠ Docker Not Installed", .systemOrange)
-            case .notRunning:   updateInfo(item, "⚠ Docker Not Running", .systemOrange)
+            case .notInstalled:
+                updateInfo(item, "⚠ Docker Not Installed", prefixColor: .systemOrange)
+            case .notRunning:
+                updateInfo(item, "⚠ Docker Not Running", prefixColor: .systemOrange)
             case .running:
                 if running {
                     if count.total > 1 {
-                        updateInfo(item, "● Conduit: Running (\(count.running)/\(count.total))", .systemGreen)
+                        updateInfo(item, "● Running (\(count.running)/\(count.total) containers)", prefixColor: .systemGreen)
                     } else {
-                        updateInfo(item, "● Conduit: Running", .systemGreen)
+                        updateInfo(item, "● Running", prefixColor: .systemGreen)
                     }
                 } else {
-                    updateInfo(item, "○ Conduit: Stopped", .secondaryLabelColor)
+                    updateInfo(item, "○ Stopped")
                 }
             }
         }
@@ -218,45 +259,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let item = menu.item(withTag: 101) {
             switch docker {
             case .notInstalled:
-                updateInfo(item, "   Install Docker Desktop to use Conduit", .secondaryLabelColor)
+                updateInfo(item, "Install Docker Desktop to use Conduit")
                 item.isHidden = false
             case .notRunning:
-                updateInfo(item, "   Please start Docker Desktop", .secondaryLabelColor)
+                updateInfo(item, "Please start Docker Desktop")
                 item.isHidden = false
             case .running:
                 item.isHidden = true
             }
         }
 
-        // Stats (102-104) - show aggregated totals
-        updateStatsItems(menu: menu, running: running, docker: docker)
-
-        // Per-container stats submenu (500)
-        updatePerContainerStats(menu: menu, docker: docker)
-
-        // Per-container controls (210, 211)
-        updatePerContainerControls(menu: menu, docker: docker)
-
-        // Controls (200-201)
-        menu.item(withTag: 200)?.title = running ? "↻ Restart All" : "▶ Start All"
-        menu.item(withTag: 200)?.isEnabled = docker == .running
-
-        // Update button titles based on container count
-        if count.total > 1 {
-            menu.item(withTag: 200)?.title = running ? "↻ Restart All" : "▶ Start All"
-            menu.item(withTag: 201)?.title = "■ Stop All"
-        } else {
-            menu.item(withTag: 200)?.title = running ? "↻ Restart" : "▶ Start"
-            menu.item(withTag: 201)?.title = "■ Stop"
+        // Aggregated stats (102, 103, 401)
+        if let item = menu.item(withTag: 102) {
+            if running, let s = stats {
+                let text = s.connecting > 0
+                    ? "\(formatLargeNumber(s.connected)) clients (\(s.connecting) connecting)"
+                    : "\(formatLargeNumber(s.connected)) clients"
+                updateInfo(item, text)
+            } else {
+                updateInfo(item, "No clients")
+            }
+            item.isHidden = docker != .running
         }
 
-        menu.item(withTag: 201)?.isEnabled = running
+        if let item = menu.item(withTag: 103) {
+            if running, let t = traffic {
+                updateInfo(item, "↑ \(t.up)  ↓ \(t.down)")
+            } else {
+                updateInfo(item, "No traffic")
+            }
+            item.isHidden = docker != .running
+        }
+
+        if let item = menu.item(withTag: 401) {
+            if let c = config {
+                updateInfo(item, "Limit: \(c.maxClients) clients / \(c.bandwidth)")
+            } else {
+                updateInfo(item, "Limit: -")
+            }
+            item.isHidden = docker != .running
+        }
+
+        // Per-container stats (601-605)
+        let hasMultiple = containerStats.count > 1
+        for i in 1...5 {
+            if let item = menu.item(withTag: 600 + i) {
+                if hasMultiple && i <= containerStats.count {
+                    let stat = containerStats[i - 1]
+                    let icon = stat.running ? "●" : "○"
+                    let color: NSColor = stat.running ? .systemGreen : .secondaryLabelColor
+                    if stat.running {
+                        updateInfo(item, "\(icon) \(stat.name): \(stat.connected) clients", prefixColor: color)
+                    } else {
+                        updateInfo(item, "\(icon) \(stat.name): stopped", prefixColor: color)
+                    }
+                    item.isHidden = false
+                } else {
+                    item.isHidden = true
+                }
+            }
+        }
+        menu.item(withTag: 650)?.isHidden = !hasMultiple  // Container separator
 
         // Docker download (300)
         menu.item(withTag: 300)?.isHidden = docker != .notInstalled
 
-        // Config (401-402)
-        updateConfigItems(menu: menu, docker: docker)
+        // Dashboard (310) - always enabled
+        menu.item(withTag: 310)?.isEnabled = true
     }
 
     private func updateIcon(docker: DockerStatus, running: Bool) {
@@ -281,43 +350,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func updateStatsItems(menu: NSMenu, running: Bool, docker: DockerStatus) {
-        // Clients (102) - aggregated total with smart formatting
-        if let item = menu.item(withTag: 102) {
-            if running, let stats = manager?.stats {
-                let connectedStr = formatLargeNumber(stats.connected)
-                let text = stats.connecting > 0
-                    ? "Clients: \(connectedStr) connected (\(stats.connecting) connecting)"
-                    : "Clients: \(connectedStr) connected"
-                updateInfo(item, text)
-            } else {
-                updateInfo(item, "Clients: -")
-            }
-            item.isHidden = docker != .running
-        }
-
-        // Traffic (103) - aggregated total
-        if let item = menu.item(withTag: 103) {
-            if running, let traffic = manager?.traffic {
-                updateInfo(item, "Traffic: ↑ \(traffic.up)  ↓ \(traffic.down)")
-            } else {
-                updateInfo(item, "Traffic: -")
-            }
-            item.isHidden = docker != .running
-        }
-
-        // Health (105) - shows overall system health with colored indicator
-        if let item = menu.item(withTag: 105) {
-            if running, let manager = manager {
-                let health = manager.healthStatus
-                updateInfo(item, "Health: \(health.icon) \(health.description)", health.color)
-                item.isHidden = false
-            } else {
-                item.isHidden = true
-            }
-        }
-    }
-
     /// Formats large numbers: 1234 → "1.2K", 1234567 → "1.2M"
     private func formatLargeNumber(_ num: Int) -> String {
         if num >= 1_000_000 {
@@ -328,184 +360,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return "\(num)"
     }
 
-    private func updatePerContainerStats(menu: NSMenu, docker: DockerStatus) {
-        guard let manager = manager, let item = menu.item(withTag: 500) else { return }
-
-        let count = manager.containerCount
-        let hasMultiple = count.total > 1
-
-        item.isHidden = !hasMultiple || docker != .running
-
-        guard hasMultiple, docker == .running, let submenu = item.submenu else { return }
-
-        // Rebuild submenu with current stats
-        submenu.removeAllItems()
-
-        let containerStats = manager.perContainerStats
-
-        for stat in containerStats {
-            let statusIcon = stat.running ? "●" : "○"
-            let statusText = stat.running ? "Running" : "Stopped"
-            let statusColor: NSColor = stat.running ? .systemGreen : .secondaryLabelColor
-
-            // Container header with custom view to avoid grey appearance
-            let headerItem = submenuInfoItem("\(statusIcon) \(stat.name) (\(statusText))", color: statusColor, bold: true)
-            submenu.addItem(headerItem)
-
-            if stat.running {
-                // Stats for this container
-                let clientText = stat.connecting > 0
-                    ? "Clients: \(stat.connected) (\(stat.connecting) connecting)"
-                    : "Clients: \(stat.connected)"
-                submenu.addItem(submenuInfoItem(clientText))
-                submenu.addItem(submenuInfoItem("Traffic: ↑ \(stat.up)  ↓ \(stat.down)"))
-                submenu.addItem(submenuInfoItem("Uptime: \(stat.uptime)"))
-            }
-
-            submenu.addItem(.separator())
-        }
-
-        // Remove trailing separator if present
-        if submenu.items.last?.isSeparatorItem == true {
-            submenu.removeItem(at: submenu.items.count - 1)
-        }
-    }
-
-    /// Creates a non-clickable submenu item with custom view (not greyed out)
-    private func submenuInfoItem(_ title: String, color: NSColor = .labelColor, bold: Bool = false) -> NSMenuItem {
-        let item = NSMenuItem()
-
-        let label = NSTextField(labelWithString: title)
-        label.font = bold ? .boldSystemFont(ofSize: 13) : .menuFont(ofSize: 13)
-        label.textColor = color
-        label.frame = NSRect(x: 8, y: 0, width: 260, height: 18)
-
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 18))
-        container.addSubview(label)
-        item.view = container
-
-        return item
-    }
-
-    private func updatePerContainerControls(menu: NSMenu, docker: DockerStatus) {
-        guard let manager = manager else { return }
-
-        let count = manager.containerCount
-        let hasMultiple = count.total > 1
-
-        // Restart One submenu (210)
-        if let restartItem = menu.item(withTag: 210) {
-            restartItem.isHidden = !hasMultiple || docker != .running
-
-            if hasMultiple, docker == .running, let submenu = restartItem.submenu {
-                submenu.removeAllItems()
-
-                for stat in manager.perContainerStats {
-                    let statusIcon = stat.running ? "●" : "○"
-                    let item = NSMenuItem(
-                        title: "\(statusIcon) \(stat.name)",
-                        action: #selector(restartContainer(_:)),
-                        keyEquivalent: ""
-                    )
-                    item.representedObject = stat.index
-                    item.target = self
-                    submenu.addItem(item)
-                }
-            }
-        }
-
-        // Stop One submenu (211)
-        if let stopItem = menu.item(withTag: 211) {
-            let anyRunning = manager.perContainerStats.contains { $0.running }
-            stopItem.isHidden = !hasMultiple || docker != .running || !anyRunning
-
-            if hasMultiple, docker == .running, let submenu = stopItem.submenu {
-                submenu.removeAllItems()
-
-                for stat in manager.perContainerStats where stat.running {
-                    let item = NSMenuItem(
-                        title: "● \(stat.name)",
-                        action: #selector(stopContainer(_:)),
-                        keyEquivalent: ""
-                    )
-                    item.representedObject = stat.index
-                    item.target = self
-                    submenu.addItem(item)
-                }
-            }
-        }
-    }
-
-    private func updateConfigItems(menu: NSMenu, docker: DockerStatus) {
-        let config = docker == .running ? manager?.config : nil
-
-        if let item = menu.item(withTag: 401) {
-            updateInfo(item, "Max Clients: \(config?.maxClients ?? "-")")
-            item.isHidden = docker != .running
-        }
-        if let item = menu.item(withTag: 402) {
-            updateInfo(item, "Bandwidth: \(config?.bandwidth ?? "-")")
-            item.isHidden = docker != .running
-        }
-    }
-
     // MARK: Actions
 
-    @objc private func startConduit() {
+    @objc private func openDashboard() {
         guard let manager = manager else { return }
-        guard manager.dockerStatus == .running else {
-            notify("Conduit", "Please start Docker Desktop first")
-            return
+
+        if dashboardWindow == nil {
+            dashboardWindow = DashboardWindowController(manager: manager, version: version)
         }
-        manager.start()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.updateStatus() }
-        notify("Conduit", "Starting Conduit service...")
-    }
-
-    @objc private func stopConduit() {
-        manager?.stop()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.updateStatus() }
-        notify("Conduit", "Conduit service stopped")
-    }
-
-    @objc private func restartContainer(_ sender: NSMenuItem) {
-        guard let index = sender.representedObject as? Int, let manager = manager else { return }
-        let name = manager.containerNameForIndex(index)
-        manager.restartOne(at: index)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.updateStatus() }
-        notify("Conduit", "Restarting \(name)...")
-    }
-
-    @objc private func stopContainer(_ sender: NSMenuItem) {
-        guard let index = sender.representedObject as? Int, let manager = manager else { return }
-        let name = manager.containerNameForIndex(index)
-        manager.stopOne(at: index)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.updateStatus() }
-        notify("Conduit", "\(name) stopped")
+        dashboardWindow?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func openDockerDownload() {
         NSWorkspace.shared.open(URL(string: "https://www.docker.com/products/docker-desktop/")!)
     }
 
-    @objc private func copyPath() {
-        let path = findScript() ?? "~/conduit-manager/conduit-mac.sh"
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
-        notify("Copied", "Script path copied to clipboard")
-    }
-
-    @objc private func openTerminalDefault() {
-        openInTerminal(preferredTerminal)
-    }
-
-    @objc private func setTerminalPreference(_ sender: NSMenuItem) {
+    @objc private func selectTerminal(_ sender: NSMenuItem) {
         guard let app = sender.representedObject as? TerminalApp else { return }
         preferredTerminal = app
-        updateTerminalMenu()
+
+        // Update checkmarks in submenu
+        if let menu = sender.menu {
+            for item in menu.items {
+                item.state = (item.representedObject as? TerminalApp == app) ? .on : .off
+            }
+        }
+
+        // Open the selected terminal
+        openTerminal(with: app)
     }
 
-    private func openInTerminal(_ app: TerminalApp) {
+    private func openTerminal(with app: TerminalApp) {
         guard let path = findScript() else {
             notify("Error", "Conduit script not found")
             return
@@ -514,7 +400,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let script: String
         switch app {
         case .terminal:
-            // Always open new window for clean state
             script = """
                 tell application "Terminal"
                     do script "\(path)"
@@ -522,31 +407,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 end tell
                 """
         case .iterm:
-            // Always open new window
             script = """
                 tell application "iTerm"
                     create window with default profile
-                    tell current window
-                        tell current session to write text "\(path)"
+                    tell current session of current window
+                        write text "\(path)"
                     end tell
                     activate
                 end tell
                 """
         }
         NSAppleScript(source: script)?.executeAndReturnError(nil)
-    }
-
-    private func updateTerminalMenu() {
-        guard let menu = statusItem?.menu,
-              let terminalPrefItem = menu.item(withTag: 306),
-              let submenu = terminalPrefItem.submenu else { return }
-
-        // Update checkmarks
-        for item in submenu.items {
-            if let app = item.representedObject as? TerminalApp {
-                item.state = (app == preferredTerminal) ? .on : .off
-            }
-        }
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
@@ -570,6 +441,946 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+// MARK: - Dashboard Window Controller
+
+class DashboardWindowController: NSWindowController {
+
+    private let manager: ConduitManager
+    private let version: String
+
+    init(manager: ConduitManager, version: String = "2.1.0") {
+        self.manager = manager
+        self.version = version
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Conduit Dashboard"
+        window.center()
+        window.minSize = NSSize(width: 420, height: 500)
+        window.isReleasedWhenClosed = false
+
+        // Force dark appearance
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
+        window.titlebarAppearsTransparent = true
+
+        super.init(window: window)
+
+        let dashboardView = DashboardView(manager: manager, version: version)
+        window.contentView = NSHostingView(rootView: dashboardView)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+// MARK: - Dashboard SwiftUI Views
+
+struct DashboardView: View {
+    let manager: ConduitManager
+    let version: String
+
+    @State private var containerStats: [ContainerStats] = []
+    @State private var totalStats: (connected: Int, connecting: Int)?
+    @State private var totalTraffic: (up: String, down: String)?
+    @State private var healthStatus: ConduitManager.HealthStatus = .unknown
+    @State private var isRefreshing = false
+    @State private var hasLoaded = false
+    @State private var hasFullData = false
+    @State private var recentLogs: [String] = []
+    @State private var selectedTab = 0  // 0 = Containers, 1 = Logs, 2 = Health
+
+    private let darkBg = Color(red: 0.1, green: 0.1, blue: 0.12)
+    private let cardBg = Color(red: 0.15, green: 0.15, blue: 0.18)
+
+    let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        ZStack {
+            darkBg.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                if !hasLoaded {
+                    Spacer()
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .tint(.white)
+                    Spacer()
+                } else {
+                    // Header with totals
+                    DashboardHeader(
+                        totalStats: totalStats,
+                        totalTraffic: totalTraffic,
+                        containerCount: containerStats.count,
+                        runningCount: containerStats.filter { $0.running }.count,
+                        isLoading: !hasFullData,
+                        version: version
+                    )
+
+                    // Tab bar
+                    HStack(spacing: 0) {
+                        TabButton(title: "Containers", isSelected: selectedTab == 0) { selectedTab = 0 }
+                        TabButton(title: "Logs", isSelected: selectedTab == 1) { selectedTab = 1 }
+                        TabButton(title: "Health", isSelected: selectedTab == 2) { selectedTab = 2 }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                    // Tab content
+                    switch selectedTab {
+                    case 0:
+                        // Container list
+                        ScrollView {
+                            VStack(spacing: 10) {
+                                ForEach(containerStats, id: \.index) { stat in
+                                    ContainerRow(stat: stat, manager: manager, onRefresh: fullRefresh, isLoading: !hasFullData && stat.running)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                        }
+
+                    case 1:
+                        // Logs view
+                        LogsView(logs: recentLogs, isLoading: !hasFullData)
+
+                    case 2:
+                        // Health check view
+                        HealthCheckView(
+                            manager: manager,
+                            healthStatus: healthStatus,
+                            containerStats: containerStats
+                        )
+
+                    default:
+                        EmptyView()
+                    }
+
+                    // Footer with global controls
+                    DashboardFooter(
+                        manager: manager,
+                        containerStats: containerStats,
+                        isRefreshing: isRefreshing,
+                        onRefresh: fullRefresh
+                    )
+                }
+            }
+        }
+        .frame(minWidth: 420, minHeight: 500)
+        .preferredColorScheme(.dark)
+        .onAppear { quickLoad() }
+        .onReceive(timer) { _ in fullRefresh() }
+    }
+
+    private func quickLoad() {
+        DispatchQueue.global(qos: .userInteractive).async {
+            let quickStats = manager.quickContainerList
+            let health = manager.healthStatus
+
+            DispatchQueue.main.async {
+                containerStats = quickStats
+                healthStatus = health
+                hasLoaded = true
+                fullRefresh()
+            }
+        }
+    }
+
+    private func fullRefresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let stats = manager.perContainerStats
+            let total = manager.stats
+            let traffic = manager.traffic
+            let health = manager.healthStatus
+            let logs = manager.recentLogs(limit: 30)
+
+            DispatchQueue.main.async {
+                containerStats = stats
+                totalStats = total
+                totalTraffic = traffic
+                healthStatus = health
+                recentLogs = logs
+                isRefreshing = false
+                hasFullData = true
+            }
+        }
+    }
+}
+
+// MARK: - Tab Button
+
+struct TabButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    private let accentGreen = Color(red: 0.2, green: 0.8, blue: 0.4)
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(isSelected ? accentGreen : .gray)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
+        .background(
+            VStack {
+                Spacer()
+                if isSelected {
+                    Rectangle()
+                        .fill(accentGreen)
+                        .frame(height: 2)
+                }
+            }
+        )
+    }
+}
+
+// MARK: - Logs View
+
+struct LogsView: View {
+    let logs: [String]
+    let isLoading: Bool
+
+    @State private var showInfo = true
+    @State private var showStats = true
+    @State private var showErrors = true
+
+    private let cardBg = Color(red: 0.12, green: 0.12, blue: 0.14)
+    private let accentGreen = Color(red: 0.2, green: 0.8, blue: 0.4)
+
+    private var filteredLogs: [String] {
+        logs.filter { line in
+            if line.contains("[INFO]") && !showInfo { return false }
+            if line.contains("[STATS]") && !showStats { return false }
+            if (line.contains("[ERROR]") || line.contains("[WARN]")) && !showErrors { return false }
+            return true
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            // Filter toggles
+            HStack(spacing: 12) {
+                FilterToggle(label: "INFO", isOn: $showInfo, color: .white.opacity(0.7))
+                FilterToggle(label: "STATS", isOn: $showStats, color: accentGreen)
+                FilterToggle(label: "ERRORS", isOn: $showErrors, color: .red)
+                Spacer()
+                Text("\(filteredLogs.count) lines")
+                    .font(.system(size: 10))
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 16)
+
+            // Log content
+            ScrollView {
+                ScrollViewReader { proxy in
+                    VStack(alignment: .leading, spacing: 2) {
+                        if isLoading && logs.isEmpty {
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Spacer()
+                            }
+                            .padding(.vertical, 20)
+                        } else if filteredLogs.isEmpty {
+                            Text(logs.isEmpty ? "No logs available" : "No matching logs")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                                .padding()
+                        } else {
+                            ForEach(Array(filteredLogs.enumerated()), id: \.offset) { index, line in
+                                LogLine(text: line)
+                                    .id(index)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .onChange(of: filteredLogs.count) { _ in
+                        withAnimation {
+                            proxy.scrollTo(filteredLogs.count - 1, anchor: .bottom)
+                        }
+                    }
+                }
+            }
+            .background(cardBg)
+            .cornerRadius(8)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        }
+        .padding(.top, 8)
+    }
+}
+
+struct FilterToggle: View {
+    let label: String
+    @Binding var isOn: Bool
+    var color: Color = .white
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 10))
+                    .foregroundColor(isOn ? color : .gray)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(isOn ? color : .gray)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct LogLine: View {
+    let text: String
+
+    private var logColor: Color {
+        if text.contains("[ERROR]") || text.contains("error") { return .red }
+        if text.contains("[WARN]") || text.contains("warning") { return .orange }
+        if text.contains("[STATS]") { return Color(red: 0.2, green: 0.8, blue: 0.4) }
+        return .white.opacity(0.8)
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundColor(logColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+}
+
+// MARK: - Health Check View
+
+struct HealthCheckView: View {
+    let manager: ConduitManager
+    let healthStatus: ConduitManager.HealthStatus
+    let containerStats: [ContainerStats]
+
+    @State private var dockerInfo: String = ""
+    @State private var isChecking = false
+
+    private let cardBg = Color(red: 0.15, green: 0.15, blue: 0.18)
+    private let accentGreen = Color(red: 0.2, green: 0.8, blue: 0.4)
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Overall status
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(healthColor)
+                        .frame(width: 12, height: 12)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("System Status: \(healthStatus.description)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text(healthMessage)
+                            .font(.system(size: 11))
+                            .foregroundColor(.gray)
+                    }
+                    Spacer()
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 10).fill(cardBg))
+
+                // Check items
+                VStack(spacing: 8) {
+                    HealthCheckItem(
+                        title: "Docker Status",
+                        status: manager.dockerStatus == .running,
+                        detail: manager.dockerStatus == .running ? "Docker is running" : "Docker not available"
+                    )
+
+                    HealthCheckItem(
+                        title: "Containers Configured",
+                        status: !containerStats.isEmpty,
+                        detail: "\(containerStats.count) container(s) configured"
+                    )
+
+                    HealthCheckItem(
+                        title: "Containers Running",
+                        status: containerStats.contains { $0.running },
+                        detail: "\(containerStats.filter { $0.running }.count) container(s) running"
+                    )
+
+                    HealthCheckItem(
+                        title: "Network Connectivity",
+                        status: containerStats.filter { $0.running }.contains { $0.connected > 0 },
+                        detail: containerStats.filter { $0.running && $0.connected > 0 }.isEmpty
+                            ? "No clients connected yet"
+                            : "Clients are connecting"
+                    )
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 10).fill(cardBg))
+
+                // Run Health Check button
+                Button {
+                    runHealthCheck()
+                } label: {
+                    HStack {
+                        if isChecking {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: "stethoscope")
+                                .font(.system(size: 11))
+                        }
+                        Text("Run Full Health Check")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                }
+                .buttonStyle(DarkButtonStyle(isPrimary: true))
+                .disabled(isChecking)
+
+                // Docker info (if available)
+                if !dockerInfo.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Docker Info")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.gray)
+                        Text(dockerInfo)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(14)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(cardBg))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+    }
+
+    private var healthColor: Color {
+        switch healthStatus {
+        case .healthy: return accentGreen
+        case .unhealthy: return .red
+        case .unknown: return .gray
+        }
+    }
+
+    private var healthMessage: String {
+        switch healthStatus {
+        case .healthy: return "All systems operational"
+        case .unhealthy: return "No containers running"
+        case .unknown: return "Unable to determine status"
+        }
+    }
+
+    private func runHealthCheck() {
+        isChecking = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let info = manager.dockerInfoSummary
+            DispatchQueue.main.async {
+                dockerInfo = info
+                isChecking = false
+            }
+        }
+    }
+}
+
+struct HealthCheckItem: View {
+    let title: String
+    let status: Bool
+    let detail: String
+
+    private let accentGreen = Color(red: 0.2, green: 0.8, blue: 0.4)
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: status ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.system(size: 14))
+                .foregroundColor(status ? accentGreen : .red.opacity(0.8))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundColor(.gray)
+            }
+
+            Spacer()
+        }
+    }
+}
+
+struct DashboardHeader: View {
+    let totalStats: (connected: Int, connecting: Int)?
+    let totalTraffic: (up: String, down: String)?
+    let containerCount: Int
+    let runningCount: Int
+    var isLoading: Bool = false
+    var version: String = ""
+
+    private let accentGreen = Color(red: 0.2, green: 0.8, blue: 0.4)
+
+    var body: some View {
+        VStack(spacing: 16) {
+            // Top bar with version
+            HStack {
+                Text("Conduit Dashboard")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.gray)
+                Spacer()
+                if !version.isEmpty {
+                    Text("v\(version)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.7))
+                }
+            }
+
+            // Big stats display
+            HStack(alignment: .top, spacing: 20) {
+                // Clients (prominent)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .lastTextBaseline, spacing: 8) {
+                        Text(isLoading ? "..." : "\(totalStats?.connected ?? 0)")
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                        if let connecting = totalStats?.connecting, connecting > 0 && !isLoading {
+                            Text("+\(connecting)")
+                                .font(.system(size: 16, weight: .medium, design: .rounded))
+                                .foregroundColor(.yellow)
+                        }
+                    }
+                    Text("connected")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+
+                Spacer()
+
+                // Traffic (more prominent)
+                VStack(alignment: .trailing, spacing: 8) {
+                    // Upload
+                    VStack(alignment: .trailing, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(accentGreen)
+                            Text(totalTraffic?.up ?? "-")
+                                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                .foregroundColor(accentGreen)
+                        }
+                        Text("uploaded")
+                            .font(.system(size: 10))
+                            .foregroundColor(.gray)
+                    }
+
+                    // Download
+                    VStack(alignment: .trailing, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(.orange)
+                            Text(totalTraffic?.down ?? "-")
+                                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                .foregroundColor(.orange)
+                        }
+                        Text("downloaded")
+                            .font(.system(size: 10))
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+
+            // Status bar
+            HStack {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(runningCount > 0 ? accentGreen : Color.gray)
+                        .frame(width: 8, height: 8)
+                    Text("\(runningCount)/\(containerCount) containers running")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
+                Spacer()
+            }
+        }
+        .padding(20)
+        .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+    }
+}
+
+struct ContainerRow: View {
+    let stat: ContainerStats
+    let manager: ConduitManager
+    let onRefresh: () -> Void
+    var isLoading: Bool = false
+
+    @State private var showQRCode = false
+
+    private let cardBg = Color(red: 0.15, green: 0.15, blue: 0.18)
+    private let accentGreen = Color(red: 0.2, green: 0.8, blue: 0.4)
+
+    /// Truncates Node ID for display (first 8 chars...last 8 chars)
+    private var truncatedNodeId: String {
+        guard stat.nodeId.count > 20 else { return stat.nodeId }
+        let start = stat.nodeId.prefix(8)
+        let end = stat.nodeId.suffix(8)
+        return "\(start)...\(end)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Header row: name + stats
+            HStack {
+                // Left side: status dot + name
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(stat.running ? accentGreen : Color.gray.opacity(0.5))
+                        .frame(width: 8, height: 8)
+
+                    Text(stat.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+
+                Spacer()
+
+                if stat.running {
+                    // Stats
+                    HStack(spacing: 12) {
+                        VStack(spacing: 2) {
+                            HStack(spacing: 2) {
+                                Text(isLoading ? "-" : "\(stat.connected)")
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.white)
+                                if stat.connecting > 0 && !isLoading {
+                                    Text("+\(stat.connecting)")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.yellow)
+                                }
+                            }
+                            Text("clients")
+                                .font(.system(size: 9))
+                                .foregroundColor(.gray)
+                        }
+                        StatPill(value: isLoading ? "-" : stat.up, label: "up", color: accentGreen)
+                        StatPill(value: isLoading ? "-" : stat.down, label: "down", color: .orange)
+                    }
+                } else {
+                    Text("Stopped")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray)
+                }
+            }
+
+            // Controls row
+            HStack(spacing: 8) {
+                if stat.running {
+                    // Icon-only Restart button
+                    Button {
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            manager.restartOne(at: stat.index)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { onRefresh() }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(IconButtonStyle())
+                    .help("Restart")
+
+                    // Icon-only Stop button
+                    Button {
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            manager.stopOne(at: stat.index)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { onRefresh() }
+                        }
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(IconButtonStyle(isDestructive: true))
+                    .help("Stop")
+                } else {
+                    // Icon-only Start button
+                    Button {
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            manager.restartOne(at: stat.index)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { onRefresh() }
+                        }
+                    } label: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(IconButtonStyle(isPrimary: true))
+                    .help("Start")
+                }
+
+                Spacer()
+
+                // Uptime with label
+                if stat.running && !isLoading && !stat.uptime.isEmpty && stat.uptime != "-" {
+                    Text("uptime: \(stat.uptime)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray)
+                }
+            }
+
+            // Node ID row - bottom center
+            if !stat.nodeId.isEmpty {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Text(truncatedNodeId)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.gray)
+                            .help(stat.nodeId)
+
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(stat.nodeId, forType: .string)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.gray.opacity(0.7))
+                        .help("Copy Node ID")
+
+                        Button {
+                            showQRCode.toggle()
+                        } label: {
+                            Image(systemName: "qrcode")
+                                .font(.system(size: 14))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.gray.opacity(0.7))
+                        .help("Show QR Code")
+                        .popover(isPresented: $showQRCode) {
+                            QRCodeView(nodeId: stat.nodeId, privateKey: stat.privateKey, containerName: stat.name)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(cardBg)
+        )
+    }
+}
+
+// MARK: - Icon Button Style
+
+struct IconButtonStyle: ButtonStyle {
+    var isPrimary: Bool = false
+    var isDestructive: Bool = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundColor(isDestructive ? .red : (isPrimary ? .black : .white))
+            .frame(width: 28, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isPrimary ? Color(red: 0.2, green: 0.8, blue: 0.4) : Color.white.opacity(0.1))
+            )
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+    }
+}
+
+// MARK: - QR Code View
+
+struct QRCodeView: View {
+    let nodeId: String
+    let privateKey: String
+    let containerName: String
+
+    /// Generate the Ryve claim URL matching the CLI format
+    private var claimUrl: String {
+        // JSON format: {"version":1,"data":{"key":"PRIVATE_KEY","name":"NODE_NAME"}}
+        let jsonData = "{\"version\":1,\"data\":{\"key\":\"\(privateKey)\",\"name\":\"\(containerName)\"}}"
+        let b64Data = Data(jsonData.utf8).base64EncodedString()
+            .replacingOccurrences(of: "\n", with: "")
+        return "network.ryve.app://(app)/conduits?claim=\(b64Data)"
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(containerName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+
+            Text("Scan in Ryve App")
+                .font(.system(size: 10))
+                .foregroundColor(.gray)
+
+            if let qrImage = generateQRCode(from: claimUrl) {
+                Image(nsImage: qrImage)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 150, height: 150)
+                    .background(Color.white)
+                    .cornerRadius(8)
+            } else {
+                Text("Could not generate QR code")
+                    .foregroundColor(.gray)
+            }
+
+            Text("Node ID: \(truncatedNodeId)")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.gray)
+                .lineLimit(1)
+        }
+        .padding(16)
+        .background(Color(red: 0.15, green: 0.15, blue: 0.18))
+        .preferredColorScheme(.dark)
+    }
+
+    private var truncatedNodeId: String {
+        guard nodeId.count > 16 else { return nodeId }
+        return "\(nodeId.prefix(8))...\(nodeId.suffix(8))"
+    }
+
+    private func generateQRCode(from string: String) -> NSImage? {
+        guard let data = string.data(using: .utf8),
+              let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("H", forKey: "inputCorrectionLevel")
+
+        guard let ciImage = filter.outputImage else { return nil }
+
+        // Scale up the QR code
+        let scale = 10.0
+        let transform = CGAffineTransform(scaleX: scale, y: scale)
+        let scaledImage = ciImage.transformed(by: transform)
+
+        let rep = NSCIImageRep(ciImage: scaledImage)
+        let nsImage = NSImage(size: rep.size)
+        nsImage.addRepresentation(rep)
+
+        return nsImage
+    }
+}
+
+struct StatPill: View {
+    let value: String
+    let label: String
+    var color: Color = .white
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundColor(color)
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundColor(.gray)
+        }
+    }
+}
+
+struct DarkButtonStyle: ButtonStyle {
+    var isPrimary: Bool = false
+    var isDestructive: Bool = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundColor(isDestructive ? .red : (isPrimary ? .black : .white))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isPrimary ? Color(red: 0.2, green: 0.8, blue: 0.4) : Color.white.opacity(0.1))
+            )
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+    }
+}
+
+struct DashboardFooter: View {
+    let manager: ConduitManager
+    let containerStats: [ContainerStats]
+    var isRefreshing: Bool = false
+    let onRefresh: () -> Void
+
+    private let accentGreen = Color(red: 0.2, green: 0.8, blue: 0.4)
+    private var hasRunning: Bool { containerStats.contains { $0.running } }
+    private var hasStopped: Bool { containerStats.contains { !$0.running } }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Start All button
+            Button {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    manager.start()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { onRefresh() }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 10))
+                    Text("Start All")
+                        .font(.system(size: 12, weight: .medium))
+                }
+            }
+            .buttonStyle(DarkButtonStyle(isPrimary: true))
+            .disabled(!hasStopped)
+            .opacity(hasStopped ? 1.0 : 0.5)
+
+            // Stop All button
+            Button {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    manager.stop()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { onRefresh() }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10))
+                    Text("Stop All")
+                        .font(.system(size: 12, weight: .medium))
+                }
+            }
+            .buttonStyle(DarkButtonStyle(isDestructive: true))
+            .disabled(!hasRunning)
+            .opacity(hasRunning ? 1.0 : 0.5)
+
+            Spacer()
+
+            // Refresh indicator
+            if isRefreshing {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 16, height: 16)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+    }
+}
+
 // MARK: - Container Stats
 
 struct ContainerStats {
@@ -581,6 +1392,8 @@ struct ContainerStats {
     let up: String
     let down: String
     let uptime: String
+    let nodeId: String      // Derived Node ID (for display)
+    let privateKey: String  // Full private key base64 (for QR code claim URL)
 }
 
 // MARK: - Conduit Manager
@@ -609,7 +1422,6 @@ class ConduitManager {
             .map { $0.trimmingCharacters(in: .whitespaces) }
         var indices: [Int] = []
         for i in 1...maxContainers {
-            // Use exact match to avoid "conduit-mac" matching "conduit-mac-2"
             if allContainers.contains(containerName(at: i)) {
                 indices.append(i)
             }
@@ -624,7 +1436,6 @@ class ConduitManager {
             .map { $0.trimmingCharacters(in: .whitespaces) }
         var indices: [Int] = []
         for i in 1...maxContainers {
-            // Use exact match to avoid "conduit-mac" matching "conduit-mac-2"
             if running.contains(containerName(at: i)) {
                 indices.append(i)
             }
@@ -718,6 +1529,9 @@ class ConduitManager {
                 }
             }
 
+            // Fetch Node ID and private key from volume
+            let (nodeId, privateKey) = fetchNodeIdAndKey(for: name)
+
             return ContainerStats(
                 index: index,
                 name: name,
@@ -726,7 +1540,85 @@ class ConduitManager {
                 connecting: connecting,
                 up: up,
                 down: down,
-                uptime: uptime
+                uptime: uptime,
+                nodeId: nodeId,
+                privateKey: privateKey
+            )
+        }
+    }
+
+    /// Fetch Node ID and private key from conduit_key.json in Docker volume
+    /// Returns (nodeId, privateKey) tuple - nodeId is derived, privateKey is the raw base64 for QR codes
+    private func fetchNodeIdAndKey(for container: String) -> (nodeId: String, privateKey: String) {
+        // Determine volume name based on container name
+        let volumeName: String
+        if container == baseContainer {
+            volumeName = "conduit-data"
+        } else if container.hasPrefix("\(baseContainer)-") {
+            let suffix = container.dropFirst(baseContainer.count + 1)  // e.g., "2" from "conduit-mac-2"
+            volumeName = "conduit-data-\(suffix)"
+        } else {
+            return ("", "")
+        }
+
+        // Read conduit_key.json from the Docker volume using alpine container
+        let keyContent = run("docker", "run", "--rm", "-v", "\(volumeName):/data", "alpine", "cat", "/data/conduit_key.json")
+
+        guard !keyContent.isEmpty else { return ("", "") }
+
+        // Extract privateKeyBase64 from JSON
+        // Format: {"privateKeyBase64":"BASE64STRING"}
+        guard let range = keyContent.range(of: "\"privateKeyBase64\"") else { return ("", "") }
+        let afterKey = keyContent[range.upperBound...]
+
+        // Find the value between quotes after the colon
+        guard let colonRange = afterKey.range(of: ":") else { return ("", "") }
+        let afterColon = afterKey[colonRange.upperBound...]
+        guard let openQuote = afterColon.firstIndex(of: "\"") else { return ("", "") }
+        let afterOpenQuote = afterColon[afterColon.index(after: openQuote)...]
+        guard let closeQuote = afterOpenQuote.firstIndex(of: "\"") else { return ("", "") }
+
+        let privateKey = String(afterOpenQuote[..<closeQuote])
+
+        // Match bash script's lenient base64 decoding behavior:
+        // When base64 string lacks padding, bash's `base64 -d` truncates to complete 4-char groups.
+        // For an 86-char string (remainder 2), bash decodes only 84 chars (63 bytes).
+        // We replicate this by truncating to the nearest multiple of 4.
+        let truncatedLength = (privateKey.count / 4) * 4
+        let truncatedKey = String(privateKey.prefix(truncatedLength))
+
+        // Decode truncated base64 (no padding needed since length is multiple of 4)
+        guard let keyData = Data(base64Encoded: truncatedKey), keyData.count >= 32 else { return ("", privateKey) }
+
+        // Take last 32 bytes, re-encode as base64, remove padding
+        let last32Bytes = keyData.suffix(32)
+        let nodeId = last32Bytes.base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+
+        return (nodeId, privateKey)
+    }
+
+    // MARK: Fast Initial Query (minimal Docker calls)
+
+    /// Quick query that only gets container names and running status - for fast initial load
+    var quickContainerList: [ContainerStats] {
+        let configured = configuredContainers
+        let running = runningContainers
+
+        return configured.map { index in
+            let name = containerName(at: index)
+            let isRunning = running.contains(index)
+            return ContainerStats(
+                index: index,
+                name: name,
+                running: isRunning,
+                connected: 0,
+                connecting: 0,
+                up: "-",
+                down: "-",
+                uptime: "-",
+                nodeId: "",
+                privateKey: ""
             )
         }
     }
@@ -754,7 +1646,6 @@ class ConduitManager {
         let running = runningContainers
         guard !running.isEmpty else { return nil }
 
-        // Aggregate traffic from all running containers
         var totalUpBytes: Int64 = 0
         var totalDownBytes: Int64 = 0
 
@@ -771,11 +1662,9 @@ class ConduitManager {
     }
 
     var uptime: String? {
-        // Show oldest container's uptime (the one that's been running longest)
         let running = runningContainers
         guard !running.isEmpty else { return nil }
 
-        // Use primary container's uptime for simplicity
         let status = run("docker", "ps", "--format", "{{.Status}}", "--filter", "name=^\(baseContainer)$")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard status.lowercased().hasPrefix("up ") else { return nil }
@@ -783,17 +1672,15 @@ class ConduitManager {
         return formatUptime(String(status.dropFirst(3)))
     }
 
-    /// Health status for the overall system
+    /// Health status for the overall system (simplified: only Healthy/Unhealthy)
     enum HealthStatus {
-        case healthy      // All containers running, getting connections
-        case degraded     // Some containers stopped or no recent connections
-        case unhealthy    // All containers stopped or major issues
-        case unknown      // Can't determine
+        case healthy
+        case unhealthy
+        case unknown
 
         var icon: String {
             switch self {
             case .healthy: return "●"
-            case .degraded: return "◐"
             case .unhealthy: return "○"
             case .unknown: return "○"
             }
@@ -802,7 +1689,6 @@ class ConduitManager {
         var color: NSColor {
             switch self {
             case .healthy: return .systemGreen
-            case .degraded: return .systemYellow
             case .unhealthy: return .systemRed
             case .unknown: return .secondaryLabelColor
             }
@@ -811,7 +1697,6 @@ class ConduitManager {
         var description: String {
             switch self {
             case .healthy: return "Healthy"
-            case .degraded: return "Degraded"
             case .unhealthy: return "Unhealthy"
             case .unknown: return "Unknown"
             }
@@ -823,20 +1708,13 @@ class ConduitManager {
         let running = runningContainers
 
         guard !configured.isEmpty else { return .unknown }
-
-        // No containers running = unhealthy
         if running.isEmpty { return .unhealthy }
 
-        // Some containers stopped = degraded
-        if running.count < configured.count { return .degraded }
-
-        // All containers running = healthy
-        // (we could check for activity, but no clients is normal for new nodes)
+        // At least one container is running = healthy
         return .healthy
     }
 
     var config: (maxClients: String, bandwidth: String)? {
-        // Aggregate max clients and bandwidth from RUNNING containers only
         let running = runningContainers
         guard !running.isEmpty else { return nil }
 
@@ -869,6 +1747,50 @@ class ConduitManager {
         }
 
         return (totalMaxClients > 0 ? "\(totalMaxClients)" : "-", bandwidthStr)
+    }
+
+    // MARK: Logs and Health
+
+    /// Get recent logs from all running containers (combined, sorted by time)
+    func recentLogs(limit: Int = 50) -> [String] {
+        let running = runningContainers
+        guard !running.isEmpty else { return [] }
+
+        // Collect logs with timestamp and container info
+        var allLogs: [(timestamp: String, container: String, line: String)] = []
+
+        // Get more logs per container to ensure we have enough after merging
+        let perContainerLimit = limit
+
+        for i in running {
+            let name = containerName(at: i)
+            let logs = run("docker", "logs", "--tail", "\(perContainerLimit)", "--timestamps", name)
+            let lines = logs.components(separatedBy: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+
+            for line in lines {
+                // Extract timestamp (format: 2026-01-29T21:34:03.123456789Z)
+                // Timestamp is at the start of the line before the first space
+                let parts = line.split(separator: " ", maxSplits: 1)
+                let timestamp = parts.count > 0 ? String(parts[0]) : ""
+                allLogs.append((timestamp: timestamp, container: name, line: line))
+            }
+        }
+
+        // Sort by timestamp (ISO format sorts correctly as strings)
+        let sorted = allLogs.sorted { $0.timestamp < $1.timestamp }
+
+        // Take the last N entries and format with container prefix
+        return sorted.suffix(limit).map { entry in
+            "[\(entry.container)] \(entry.line)"
+        }
+    }
+
+    /// Get Docker system info summary for health check
+    var dockerInfoSummary: String {
+        let info = run("docker", "info", "--format",
+            "Server Version: {{.ServerVersion}}\nContainers: {{.Containers}} (Running: {{.ContainersRunning}})\nImages: {{.Images}}\nMemory: {{.MemTotal}}\nCPUs: {{.NCPU}}")
+        return info.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: Helpers
@@ -952,18 +1874,6 @@ class ConduitManager {
         } else {
             return String(format: "%.1f %@", value, units[unitIndex])
         }
-    }
-
-    /// Formats large numbers nicely: 1234 → "1.2K", 1234567 → "1.2M"
-    private func formatNumber(_ num: Int) -> String {
-        if num >= 1_000_000 {
-            return String(format: "%.1fM", Double(num) / 1_000_000)
-        } else if num >= 10_000 {
-            return String(format: "%.1fK", Double(num) / 1_000)
-        } else if num >= 1_000 {
-            return String(format: "%.1fK", Double(num) / 1_000)
-        }
-        return "\(num)"
     }
 
     private let dockerPaths = [

@@ -1725,10 +1725,6 @@ view_dashboard() {
             local uptime=""
             uptime=$(docker ps -f "name=$CONTAINER_NAME" --format '{{.Status}}' 2>/dev/null) || uptime="Unknown"
 
-            # Get node ID from primary container
-            local node_id=""
-            node_id=$(get_node_id) || node_id=""
-
             # Get traffic stats from primary container (combined traffic not easily aggregated)
             local log_output=""
             log_output=$(docker logs --tail 50 "$CONTAINER_NAME" 2>&1) || log_output=""
@@ -1775,27 +1771,6 @@ view_dashboard() {
             else
                 echo -e " STATUS:      ${GREEN}● ONLINE${NC}${CL}"
                 echo -e " UPTIME:      ${uptime}${CL}"
-            fi
-            # Show all Node IDs for multi-container, single for single-container
-            if [ "$CONTAINER_COUNT" -gt 1 ]; then
-                echo "──────────────────────────────────────────────────────${CL}"
-                echo -e " ${BOLD}NODE IDs${NC}${CL}"
-                local nid_i=1
-                while [ $nid_i -le "$CONTAINER_COUNT" ]; do
-                    local nid_name nid_val
-                    nid_name=$(get_container_name "$nid_i")
-                    nid_val=$(get_node_id "$nid_i") || nid_val=""
-                    if [ -n "$nid_val" ]; then
-                        printf "   %-16s ${CYAN}%s${NC}${CL}\n" "$nid_name:" "$nid_val"
-                    else
-                        printf "   %-16s ${DIM}(not available)${NC}${CL}\n" "$nid_name:"
-                    fi
-                    nid_i=$((nid_i + 1))
-                done
-            else
-                if [ -n "$node_id" ]; then
-                    echo -e " NODE ID:     ${CYAN}${node_id}${NC}${CL}"
-                fi
             fi
             echo "──────────────────────────────────────────────────────${CL}"
 

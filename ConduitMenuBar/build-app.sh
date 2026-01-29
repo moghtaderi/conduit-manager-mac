@@ -7,7 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="Conduit-Mac"
 BUNDLE_ID="com.psiphon.conduit-mac-menubar"
-VERSION="2.0.6"
+VERSION="2.1.0"
 
 echo "Building Conduit-Mac Menu Bar App..."
 
