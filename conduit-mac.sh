@@ -745,20 +745,49 @@ backup_key() {
     echo -e "${CYAN}═══ BACKUP CONDUIT NODE KEY ═══${NC}"
     echo ""
 
+    # For multi-container, let user choose which container to backup
+    local target_index=1
+    local target_vol
+
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        echo "Select container to backup:"
+        echo ""
+        local i=1
+        while [ $i -le "$CONTAINER_COUNT" ]; do
+            local name vol node_id_preview
+            name=$(get_container_name "$i")
+            vol=$(get_volume_name "$i")
+            node_id_preview=$(docker run --rm -v "$vol":/data alpine cat /data/conduit_key.json 2>/dev/null | grep "privateKeyBase64" | awk -F'"' '{print $4}' | base64 -d 2>/dev/null | tail -c 32 | base64 | tr -d '=\n' 2>/dev/null) || node_id_preview=""
+            echo "  ${i}. ${name} - Node: ${node_id_preview:-not created}"
+            i=$((i + 1))
+        done
+        echo ""
+        read -p "Select container [1-$CONTAINER_COUNT]: " target_index
+        if ! [[ "$target_index" =~ ^[1-9]$ ]] || [ "$target_index" -gt "$CONTAINER_COUNT" ]; then
+            echo -e "${RED}Invalid selection${NC}"
+            read -n 1 -s -r -p "Press any key to return..."
+            return 1
+        fi
+    fi
+
+    target_vol=$(get_volume_name "$target_index")
+    local target_name
+    target_name=$(get_container_name "$target_index")
+
     # Check if container/volume exists
-    if ! docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1; then
-        echo -e "${RED}Error: Could not find conduit-data volume${NC}"
-        echo "Has Conduit been started at least once?"
+    if ! docker volume inspect "$target_vol" >/dev/null 2>&1; then
+        echo -e "${RED}Error: Could not find ${target_vol} volume${NC}"
+        echo "Has this container been started at least once?"
         read -n 1 -s -r -p "Press any key to return..."
         return 1
     fi
 
     # Try to read the key file
     local key_content
-    key_content=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null) || key_content=""
+    key_content=$(docker run --rm -v "$target_vol":/data alpine cat /data/conduit_key.json 2>/dev/null) || key_content=""
 
     if [ -z "$key_content" ]; then
-        echo -e "${RED}Error: No node key found. Has Conduit been started at least once?${NC}"
+        echo -e "${RED}Error: No node key found. Has this container been started at least once?${NC}"
         read -n 1 -s -r -p "Press any key to return..."
         return 1
     fi
@@ -766,10 +795,15 @@ backup_key() {
     # Create backup directory
     mkdir -p "$BACKUP_DIR"
 
-    # Create timestamped backup
+    # Create timestamped backup (include container index for multi-container)
     local timestamp
     timestamp=$(date '+%Y%m%d_%H%M%S')
-    local backup_file="$BACKUP_DIR/conduit_key_${timestamp}.json"
+    local backup_file
+    if [ "$target_index" -eq 1 ]; then
+        backup_file="$BACKUP_DIR/conduit_key_${timestamp}.json"
+    else
+        backup_file="$BACKUP_DIR/conduit_key_${target_index}_${timestamp}.json"
+    fi
 
     # Write the key to backup file
     echo "$key_content" > "$backup_file"
@@ -779,10 +813,11 @@ backup_key() {
     local node_id
     node_id=$(echo "$key_content" | grep "privateKeyBase64" | awk -F'"' '{print $4}' | base64 -d 2>/dev/null | tail -c 32 | base64 | tr -d '=\n' 2>/dev/null)
 
-    log_info "Node key backed up to: $backup_file"
+    log_info "Node key backed up from $target_name to: $backup_file"
 
     echo -e "${GREEN}✔ Backup created successfully${NC}"
     echo ""
+    echo -e "  Container:   ${CYAN}${target_name}${NC}"
     echo -e "  Backup file: ${CYAN}${backup_file}${NC}"
     echo -e "  Node ID:     ${CYAN}${node_id:-unknown}${NC}"
     echo ""
@@ -802,6 +837,38 @@ restore_key() {
     print_header
     echo -e "${CYAN}═══ RESTORE CONDUIT NODE KEY ═══${NC}"
     echo ""
+
+    # For multi-container, let user choose which container to restore to
+    local target_index=1
+    local target_vol
+    local target_name
+
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        echo "Select container to restore to:"
+        echo ""
+        local i=1
+        while [ $i -le "$CONTAINER_COUNT" ]; do
+            local name vol node_id_preview
+            name=$(get_container_name "$i")
+            vol=$(get_volume_name "$i")
+            node_id_preview=$(docker run --rm -v "$vol":/data alpine cat /data/conduit_key.json 2>/dev/null | grep "privateKeyBase64" | awk -F'"' '{print $4}' | base64 -d 2>/dev/null | tail -c 32 | base64 | tr -d '=\n' 2>/dev/null) || node_id_preview=""
+            echo "  ${i}. ${name} - Current Node: ${node_id_preview:-none}"
+            i=$((i + 1))
+        done
+        echo ""
+        read -p "Select container [1-$CONTAINER_COUNT]: " target_index
+        if ! [[ "$target_index" =~ ^[1-9]$ ]] || [ "$target_index" -gt "$CONTAINER_COUNT" ]; then
+            echo -e "${RED}Invalid selection${NC}"
+            read -n 1 -s -r -p "Press any key to return..."
+            return 1
+        fi
+        echo ""
+    fi
+
+    target_vol=$(get_volume_name "$target_index")
+    target_name=$(get_container_name "$target_index")
+
+    local backup_file=""
 
     # Check if backup directory exists and has files
     if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR"/*.json 2>/dev/null)" ]; then
@@ -855,7 +922,7 @@ restore_key() {
     fi
 
     echo ""
-    echo -e "${YELLOW}Warning:${NC} This will replace the current node key."
+    echo -e "${YELLOW}Warning:${NC} This will replace the node key for ${CYAN}${target_name}${NC}."
     echo "The container will be stopped and restarted."
     echo ""
     read -p "Proceed with restore? [y/N] " confirm
@@ -868,15 +935,15 @@ restore_key() {
 
     # Stop container
     echo ""
-    echo "Stopping Conduit..."
-    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    echo "Stopping ${target_name}..."
+    docker stop "$target_name" 2>/dev/null || true
 
     # Restore the key using a temporary container
     # Also fix ownership to UID 1000 (conduit user inside container)
     echo "Restoring key..."
-    if ! docker run --rm -v "$VOLUME_NAME":/data -v "$(dirname "$backup_file")":/backup alpine \
+    if ! docker run --rm -v "$target_vol":/data -v "$(dirname "$backup_file")":/backup alpine \
         sh -c "cp /backup/$(basename "$backup_file") /data/conduit_key.json && chmod 600 /data/conduit_key.json && chown -R 1000:1000 /data"; then
-        log_error "Failed to copy key to volume"
+        log_error "Failed to copy key to volume $target_vol"
         echo -e "${RED}✘ Failed to restore key - copy operation failed${NC}"
         read -n 1 -s -r -p "Press any key to return..."
         return 1
@@ -885,7 +952,7 @@ restore_key() {
     # Verify the key was actually written to the volume
     echo "Verifying restore..."
     local verify_content=""
-    verify_content=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null) || verify_content=""
+    verify_content=$(docker run --rm -v "$target_vol":/data alpine cat /data/conduit_key.json 2>/dev/null) || verify_content=""
     if [ -z "$verify_content" ] || ! echo "$verify_content" | grep -q "privateKeyBase64"; then
         log_error "Key verification failed - file not found or invalid"
         echo -e "${RED}✘ Failed to restore key - verification failed${NC}"
@@ -894,17 +961,18 @@ restore_key() {
     fi
 
     # Restart container
-    echo "Starting Conduit..."
-    docker start "$CONTAINER_NAME" 2>/dev/null || true
+    echo "Starting ${target_name}..."
+    docker start "$target_name" 2>/dev/null || true
 
     local node_id
     node_id=$(cat "$backup_file" | grep "privateKeyBase64" | awk -F'"' '{print $4}' | base64 -d 2>/dev/null | tail -c 32 | base64 | tr -d '=\n' 2>/dev/null)
 
-    log_info "Node key restored from: $backup_file"
+    log_info "Node key restored to $target_name from: $backup_file"
 
     echo ""
     echo -e "${GREEN}✔ Node key restored successfully${NC}"
-    echo -e "  Node ID: ${CYAN}${node_id:-unknown}${NC}"
+    echo -e "  Container: ${CYAN}${target_name}${NC}"
+    echo -e "  Node ID:   ${CYAN}${node_id:-unknown}${NC}"
     echo ""
     read -n 1 -s -r -p "Press any key to return..."
 }
@@ -1683,18 +1751,52 @@ view_dashboard() {
 # view_logs: Stream container logs in real-time
 view_logs() {
     log_info "Log view started"
+
+    # For multi-container, let user choose which container's logs to view
+    local target_index=1
+    local target_name
+
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        printf '\033[2J\033[3J\033[H'
+        echo -e "${CYAN}═══ VIEW LOGS ═══${NC}"
+        echo ""
+        echo "Select container to view logs:"
+        echo ""
+        local i=1
+        while [ $i -le "$CONTAINER_COUNT" ]; do
+            local name status
+            name=$(get_container_name "$i")
+            if container_running "$i"; then
+                status="${GREEN}running${NC}"
+            else
+                status="${RED}stopped${NC}"
+            fi
+            echo -e "  ${i}. ${name} (${status})"
+            i=$((i + 1))
+        done
+        echo ""
+        read -p "Container number [1-$CONTAINER_COUNT]: " target_index
+        if ! [[ "$target_index" =~ ^[1-9]$ ]] || [ "$target_index" -gt "$CONTAINER_COUNT" ]; then
+            echo -e "${RED}Invalid selection${NC}"
+            sleep 1
+            return
+        fi
+    fi
+
+    target_name=$(get_container_name "$target_index")
+
     # Clear screen and scrollback buffer
     printf '\033[2J\033[3J\033[H'
-    echo -e "${CYAN}Streaming Logs (Press Ctrl+C to Exit)...${NC}"
+    echo -e "${CYAN}Streaming Logs for ${target_name} (Press Ctrl+C to Exit)...${NC}"
     echo "------------------------------------------------"
     echo ""
 
-    if container_running; then
+    if container_running "$target_index"; then
         # Trap SIGINT to gracefully handle Ctrl+C without exiting script
         trap 'echo ""; echo ""; echo -e "${CYAN}Log streaming stopped.${NC}"' SIGINT
 
         # Stream logs - the || true handles the interrupt exit code
-        docker logs -f --tail 100 "$CONTAINER_NAME" 2>&1 || true
+        docker logs -f --tail 100 "$target_name" 2>&1 || true
 
         # Reset trap
         trap - SIGINT
@@ -1702,7 +1804,7 @@ view_logs() {
         echo ""
         read -n 1 -s -r -p "Press any key to return..."
     else
-        echo -e "${YELLOW}Container is not running.${NC}"
+        echo -e "${YELLOW}Container ${target_name} is not running.${NC}"
         echo "Start the container first to view logs."
         echo ""
         read -n 1 -s -r -p "Press any key to return..."
@@ -1728,9 +1830,14 @@ configure_resources() {
     echo "  Total CPU Cores: ${total_cores}"
     echo "  Total RAM:       ${total_ram_gb} GB"
     echo ""
-    echo -e "${BOLD}Current Limits:${NC}"
+    echo -e "${BOLD}Current Limits (per container):${NC}"
     echo "  Memory Limit:    ${MAX_MEMORY}"
     echo "  CPU Limit:       ${MAX_CPUS} cores"
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        echo ""
+        echo -e "  ${DIM}Note: These limits apply to each of your ${CONTAINER_COUNT} containers.${NC}"
+        echo -e "  ${DIM}Total potential usage: ${CONTAINER_COUNT}x${MAX_MEMORY} RAM, ${CONTAINER_COUNT}x${MAX_CPUS} CPU${NC}"
+    fi
     echo ""
     echo "══════════════════════════════════════════════════════"
     echo ""
@@ -1792,21 +1899,56 @@ show_node_info() {
     echo "══════════════════════════════════════════════════════"
     echo ""
 
-    local node_id
-    node_id=$(get_node_id)
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        # Multi-container: show all node IDs
+        echo -e "  ${BOLD}Container Node IDs:${NC}"
+        echo ""
 
-    if [ -n "$node_id" ]; then
-        echo -e "  Node ID: ${CYAN}${node_id}${NC}"
+        local i=1
+        local has_any=false
+        while [ $i -le "$CONTAINER_COUNT" ]; do
+            local name vol node_id
+            name=$(get_container_name "$i")
+            vol=$(get_volume_name "$i")
+            node_id=$(docker run --rm -v "$vol":/data alpine cat /data/conduit_key.json 2>/dev/null | grep "privateKeyBase64" | awk -F'"' '{print $4}' | base64 -d 2>/dev/null | tail -c 32 | base64 | tr -d '=\n' 2>/dev/null) || node_id=""
+
+            if [ -n "$node_id" ]; then
+                echo -e "  ${name}: ${CYAN}${node_id}${NC}"
+                has_any=true
+            else
+                echo -e "  ${name}: ${YELLOW}(not created)${NC}"
+            fi
+            i=$((i + 1))
+        done
+
         echo ""
-        echo "  This ID uniquely identifies your node on the Psiphon network."
-        echo "  It is derived from your private key stored in the Docker volume."
-        echo ""
-        echo -e "  ${YELLOW}Tip:${NC} Use 'Backup Key' to save your identity for recovery."
+        if [ "$has_any" = true ]; then
+            echo "  Each container has a unique node ID on the Psiphon network."
+            echo "  Node IDs are derived from private keys stored in Docker volumes."
+            echo ""
+            echo -e "  ${YELLOW}Tip:${NC} Use 'Backup Key' to save each identity for recovery."
+        else
+            echo "  Node identities are created when containers first start."
+            echo "  Start the service to generate node identities."
+        fi
     else
-        echo -e "  ${YELLOW}No node ID found.${NC}"
-        echo ""
-        echo "  The node identity is created when Conduit first starts."
-        echo "  Start the service to generate a new node identity."
+        # Single container: original behavior
+        local node_id
+        node_id=$(get_node_id)
+
+        if [ -n "$node_id" ]; then
+            echo -e "  Node ID: ${CYAN}${node_id}${NC}"
+            echo ""
+            echo "  This ID uniquely identifies your node on the Psiphon network."
+            echo "  It is derived from your private key stored in the Docker volume."
+            echo ""
+            echo -e "  ${YELLOW}Tip:${NC} Use 'Backup Key' to save your identity for recovery."
+        else
+            echo -e "  ${YELLOW}No node ID found.${NC}"
+            echo ""
+            echo "  The node identity is created when Conduit first starts."
+            echo "  Start the service to generate a new node identity."
+        fi
     fi
 
     echo ""
@@ -2112,8 +2254,13 @@ uninstall_all() {
     echo -e "${RED}═══ UNINSTALL CONDUIT ═══${NC}"
     echo ""
     echo -e "${RED}WARNING: This will remove:${NC}"
-    echo -e "${RED}  - The Conduit container${NC}"
-    echo -e "${RED}  - The conduit-data Docker volume (node identity!)${NC}"
+    if [ "$CONTAINER_COUNT" -gt 1 ]; then
+        echo -e "${RED}  - All ${CONTAINER_COUNT} Conduit containers${NC}"
+        echo -e "${RED}  - All ${CONTAINER_COUNT} data volumes (node identities!)${NC}"
+    else
+        echo -e "${RED}  - The Conduit container${NC}"
+        echo -e "${RED}  - The conduit-data Docker volume (node identity!)${NC}"
+    fi
     echo -e "${RED}  - The conduit-network Docker network${NC}"
     echo -e "${RED}  - The Docker image${NC}"
     echo -e "${RED}  - The log file (~/.conduit-manager.log)${NC}"
@@ -2136,7 +2283,7 @@ uninstall_all() {
     if [ "$has_backup" = true ]; then
         echo -e "${GREEN}✔ You have ${backup_count} backup key(s) in ${BACKUP_DIR}${NC}"
     else
-        echo -e "${YELLOW}⚠ You have NO backup keys. Your node identity will be LOST.${NC}"
+        echo -e "${YELLOW}⚠ You have NO backup keys. Your node identit${CONTAINER_COUNT -gt 1 ? "ies" : "y"} will be LOST.${NC}"
         echo "  Consider running 'Backup Key' first!"
     fi
     echo ""
@@ -2165,18 +2312,31 @@ uninstall_all() {
     fi
 
     echo ""
-    log_info "Uninstall initiated by user (delete_backups=$delete_backups)"
+    log_info "Uninstall initiated by user (containers=$CONTAINER_COUNT, delete_backups=$delete_backups)"
 
-    # Stop and remove container
-    echo "Stopping container..."
-    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    # Stop and remove ALL containers and their volumes
+    local i=1
+    while [ $i -le "$MAX_CONTAINERS" ]; do
+        local name vol
+        name=$(get_container_name "$i")
+        vol=$(get_volume_name "$i")
 
-    echo "Removing container..."
-    docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+        # Check if container exists before trying to remove
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${name}$"; then
+            echo "Stopping container ${name}..."
+            docker stop "$name" 2>/dev/null || true
+            echo "Removing container ${name}..."
+            docker rm -f "$name" 2>/dev/null || true
+        fi
 
-    # Remove volume
-    echo "Removing data volume..."
-    docker volume rm "$VOLUME_NAME" 2>/dev/null || true
+        # Check if volume exists before trying to remove
+        if docker volume inspect "$vol" >/dev/null 2>&1; then
+            echo "Removing data volume ${vol}..."
+            docker volume rm "$vol" 2>/dev/null || true
+        fi
+
+        i=$((i + 1))
+    done
 
     # Remove network
     echo "Removing network..."
@@ -3120,15 +3280,69 @@ while true; do
             print_header
             echo -e "${YELLOW}═══ RECONFIGURE CONDUIT ═══${NC}"
             echo ""
-            echo -e "${YELLOW}This will recreate the container with new settings.${NC}"
-            echo "Your node identity key will be preserved."
-            echo ""
-            read -p "Continue with reconfiguration? (y/N): " confirm_reconfig
-            if [[ "$confirm_reconfig" =~ ^[Yy]$ ]]; then
-                install_new
+            if [ "$CONTAINER_COUNT" -gt 1 ]; then
+                echo -e "${YELLOW}You have ${CONTAINER_COUNT} containers configured.${NC}"
+                echo ""
+                echo "  1. Reconfigure primary container (conduit-mac)"
+                echo "  2. Reconfigure a specific container"
+                echo "  0. Cancel"
+                echo ""
+                read -p "Select option: " reconfig_choice
+
+                case "$reconfig_choice" in
+                    1)
+                        echo ""
+                        echo -e "${YELLOW}This will recreate the primary container with new settings.${NC}"
+                        echo "Your node identity key will be preserved."
+                        echo ""
+                        read -p "Continue? (y/N): " confirm_reconfig
+                        if [[ "$confirm_reconfig" =~ ^[Yy]$ ]]; then
+                            install_new
+                        else
+                            echo "Reconfiguration cancelled."
+                            sleep 1
+                        fi
+                        ;;
+                    2)
+                        echo ""
+                        echo "Select container to reconfigure:"
+                        local i=1
+                        while [ $i -le "$CONTAINER_COUNT" ]; do
+                            local name
+                            name=$(get_container_name "$i")
+                            echo "  ${i}. ${name}"
+                            i=$((i + 1))
+                        done
+                        echo ""
+                        read -p "Container number [1-$CONTAINER_COUNT]: " container_choice
+                        if [[ "$container_choice" =~ ^[1-9]$ ]] && [ "$container_choice" -le "$CONTAINER_COUNT" ]; then
+                            echo ""
+                            echo -e "${YELLOW}Reconfiguring $(get_container_name "$container_choice")...${NC}"
+                            echo "Use Container Manager (option 9) to remove and re-add"
+                            echo "containers with different settings."
+                            echo ""
+                            read -n 1 -s -r -p "Press any key to continue..."
+                        else
+                            echo -e "${RED}Invalid selection${NC}"
+                            sleep 1
+                        fi
+                        ;;
+                    *)
+                        echo "Cancelled."
+                        sleep 1
+                        ;;
+                esac
             else
-                echo "Reconfiguration cancelled."
-                sleep 1
+                echo -e "${YELLOW}This will recreate the container with new settings.${NC}"
+                echo "Your node identity key will be preserved."
+                echo ""
+                read -p "Continue with reconfiguration? (y/N): " confirm_reconfig
+                if [[ "$confirm_reconfig" =~ ^[Yy]$ ]]; then
+                    install_new
+                else
+                    echo "Reconfiguration cancelled."
+                    sleep 1
+                fi
             fi
             ;;
         7) configure_resources ;;

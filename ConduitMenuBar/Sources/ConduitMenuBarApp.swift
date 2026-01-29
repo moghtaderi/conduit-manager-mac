@@ -1,5 +1,6 @@
 /// Psiphon Conduit Menu Bar App for macOS
-/// A lightweight menu bar app to control the Psiphon Conduit Docker container.
+/// A lightweight menu bar app to control the Psiphon Conduit Docker container(s).
+/// Supports multi-container configurations (up to 5 containers).
 
 import SwiftUI
 import AppKit
@@ -35,7 +36,7 @@ enum TerminalApp: String, CaseIterable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    private let version = "1.6.2"
+    private let version = "2.0.0"
     private var statusItem: NSStatusItem?
     private var manager: ConduitManager?
     private var timer: Timer?
@@ -169,8 +170,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             switch docker {
             case .notInstalled: updateInfo(item, "⚠ Docker Not Installed", .systemOrange)
             case .notRunning:   updateInfo(item, "⚠ Docker Not Running", .systemOrange)
-            case .running:      updateInfo(item, running ? "● Conduit: Running" : "○ Conduit: Stopped",
-                                           running ? .systemGreen : .secondaryLabelColor)
+            case .running:
+                let count = manager.containerCount
+                if running {
+                    if count.total > 1 {
+                        updateInfo(item, "● Conduit: Running (\(count.running)/\(count.total))", .systemGreen)
+                    } else {
+                        updateInfo(item, "● Conduit: Running", .systemGreen)
+                    }
+                } else {
+                    updateInfo(item, "○ Conduit: Stopped", .secondaryLabelColor)
+                }
             }
         }
 
@@ -382,7 +392,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 class ConduitManager {
 
-    private let container = "conduit-mac"
+    private let baseContainer = "conduit-mac"
+    private let maxContainers = 5
+
+    // MARK: Multi-Container Support
+
+    /// Get container name for index (1 = "conduit-mac", 2 = "conduit-mac-2", etc.)
+    private func containerName(at index: Int) -> String {
+        index == 1 ? baseContainer : "\(baseContainer)-\(index)"
+    }
+
+    /// Find all configured containers (returns indices of existing containers)
+    private var configuredContainers: [Int] {
+        let allContainers = run("docker", "ps", "-a", "--format", "{{.Names}}")
+        var indices: [Int] = []
+        for i in 1...maxContainers {
+            if allContainers.contains(containerName(at: i)) {
+                indices.append(i)
+            }
+        }
+        return indices
+    }
+
+    /// Find all running containers
+    private var runningContainers: [Int] {
+        let running = run("docker", "ps", "--format", "{{.Names}}")
+        var indices: [Int] = []
+        for i in 1...maxContainers {
+            if running.contains(containerName(at: i)) {
+                indices.append(i)
+            }
+        }
+        return indices
+    }
+
+    /// Container count info for display
+    var containerCount: (running: Int, total: Int) {
+        (runningContainers.count, configuredContainers.count)
+    }
 
     // MARK: Status
 
@@ -393,7 +440,7 @@ class ConduitManager {
     }
 
     var isRunning: Bool {
-        run("docker", "ps", "--format", "{{.Names}}").contains(container)
+        !runningContainers.isEmpty
     }
 
     private var isDockerInstalled: Bool {
@@ -408,24 +455,44 @@ class ConduitManager {
     // MARK: Container Control
 
     func start() {
-        let all = run("docker", "ps", "-a", "--format", "{{.Names}}")
-        if all.contains(container) {
-            _ = isRunning ? run("docker", "restart", container) : run("docker", "start", container)
+        let configured = configuredContainers
+        guard !configured.isEmpty else { return }
+
+        for i in configured {
+            let name = containerName(at: i)
+            let running = runningContainers.contains(i)
+            _ = running ? run("docker", "restart", name) : run("docker", "start", name)
         }
     }
 
-    func stop() { _ = run("docker", "stop", container) }
+    func stop() {
+        for i in runningContainers {
+            _ = run("docker", "stop", containerName(at: i))
+        }
+    }
 
-    // MARK: Stats
+    // MARK: Aggregated Stats (from all running containers)
 
     var stats: (connected: Int, connecting: Int)? {
-        guard let line = recentStatsLine else { return nil }
-        return (extractInt(from: line, after: "Connected: "),
-                extractInt(from: line, after: "Connecting: "))
+        let running = runningContainers
+        guard !running.isEmpty else { return nil }
+
+        var totalConnected = 0
+        var totalConnecting = 0
+
+        for i in running {
+            if let line = recentStatsLine(for: containerName(at: i)) {
+                totalConnected += extractInt(from: line, after: "Connected: ")
+                totalConnecting += extractInt(from: line, after: "Connecting: ")
+            }
+        }
+
+        return (totalConnected, totalConnecting)
     }
 
     var traffic: (up: String, down: String)? {
-        guard let line = recentStatsLine else { return nil }
+        // For traffic, show primary container's traffic (aggregating bytes is complex)
+        guard let line = recentStatsLine(for: baseContainer) else { return nil }
         let up = extractValue(from: line, after: "Up: ")
         let down = extractValue(from: line, after: "Down: ")
         guard up != "-" || down != "-" else { return nil }
@@ -433,7 +500,12 @@ class ConduitManager {
     }
 
     var uptime: String? {
-        let status = run("docker", "ps", "--format", "{{.Status}}", "--filter", "name=\(container)")
+        // Show oldest container's uptime (the one that's been running longest)
+        let running = runningContainers
+        guard !running.isEmpty else { return nil }
+
+        // Use primary container's uptime for simplicity
+        let status = run("docker", "ps", "--format", "{{.Status}}", "--filter", "name=^\(baseContainer)$")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard status.lowercased().hasPrefix("up ") else { return nil }
 
@@ -454,16 +526,33 @@ class ConduitManager {
     }
 
     var config: (maxClients: String, bandwidth: String)? {
-        let args = run("docker", "inspect", "--format", "{{.Args}}", container)
-        let maxClients = extractInt(from: args, after: "--max-clients ")
-        let bw = extractInt(from: args, after: "--bandwidth ")
-        return (maxClients > 0 ? "\(maxClients)" : "-",
-                bw == -1 ? "Unlimited" : bw > 0 ? "\(bw) Mbps" : "-")
+        // Aggregate max clients from all containers
+        let configured = configuredContainers
+        guard !configured.isEmpty else { return nil }
+
+        var totalMaxClients = 0
+        var bandwidth: String = "-"
+
+        for i in configured {
+            let args = run("docker", "inspect", "--format", "{{.Args}}", containerName(at: i))
+            let maxClients = extractInt(from: args, after: "--max-clients ")
+            if maxClients > 0 {
+                totalMaxClients += maxClients
+            }
+
+            // Use first container's bandwidth for display
+            if i == configured.first {
+                let bw = extractInt(from: args, after: "--bandwidth ")
+                bandwidth = bw == -1 ? "Unlimited" : bw > 0 ? "\(bw) Mbps" : "-"
+            }
+        }
+
+        return (totalMaxClients > 0 ? "\(totalMaxClients)" : "-", bandwidth)
     }
 
     // MARK: Helpers
 
-    private var recentStatsLine: String? {
+    private func recentStatsLine(for container: String) -> String? {
         run("docker", "logs", "--tail", "50", container)
             .components(separatedBy: "\n")
             .reversed()
