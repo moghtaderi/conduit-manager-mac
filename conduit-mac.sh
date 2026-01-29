@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.8.0"                                          # Script version
+readonly VERSION="1.9.0"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -2341,6 +2341,178 @@ generate_claim_link() {
 }
 
 # ==============================================================================
+# INFO & HELP HUB
+# ==============================================================================
+
+# show_info_how_it_works: Explain how Conduit proxy works
+show_info_how_it_works() {
+    print_header
+    echo -e "${CYAN}═══ HOW CONDUIT WORKS ═══${NC}"
+    echo ""
+    echo -e "${BOLD}What is Psiphon Conduit?${NC}"
+    echo "  Conduit is a proxy node that helps people in censored regions"
+    echo "  access the open internet. When you run Conduit, your computer"
+    echo "  becomes a relay point for Psiphon users."
+    echo ""
+    echo -e "${BOLD}How Traffic Flows:${NC}"
+    echo ""
+    echo "  ┌─────────────┐      ┌─────────────┐      ┌─────────────┐"
+    echo "  │   Psiphon   │ ──── │ Your Conduit│ ──── │  Internet   │"
+    echo "  │    User     │      │    Node     │      │  (Websites) │"
+    echo "  └─────────────┘      └─────────────┘      └─────────────┘"
+    echo "     (censored)          (your Mac)           (open web)"
+    echo ""
+    echo -e "${BOLD}What Happens on Your Mac:${NC}"
+    echo "  1. Psiphon users connect to the Psiphon network"
+    echo "  2. The network routes some traffic through your Conduit"
+    echo "  3. Your Conduit fetches the requested content"
+    echo "  4. Content is sent back through the encrypted tunnel"
+    echo ""
+    echo -e "${BOLD}Your Role:${NC}"
+    echo "  • You donate bandwidth to help others access information"
+    echo "  • Traffic is encrypted - you cannot see what users access"
+    echo "  • The Conduit runs in an isolated Docker container"
+    echo "  • Your personal data and files are never exposed"
+    echo ""
+    echo "══════════════════════════════════════════════════════"
+    read -n 1 -s -r -p "Press any key to return..."
+}
+
+# show_info_stats: Explain what the stats mean
+show_info_stats() {
+    print_header
+    echo -e "${CYAN}═══ UNDERSTANDING THE STATS ═══${NC}"
+    echo ""
+    echo -e "${BOLD}Dashboard Metrics:${NC}"
+    echo ""
+    echo "  ${GREEN}Connected${NC}     Number of Psiphon users currently using your node"
+    echo "  ${YELLOW}Connecting${NC}   Users in the process of establishing a connection"
+    echo "  ${CYAN}Max Clients${NC}   Your configured limit for simultaneous connections"
+    echo ""
+    echo -e "${BOLD}Resource Usage:${NC}"
+    echo ""
+    echo "  ${GREEN}CPU%${NC}         How much processor your Conduit is using"
+    echo "  ${GREEN}Memory${NC}       RAM consumed by the Docker container"
+    echo "  ${GREEN}Network I/O${NC}  Data transferred (received / sent)"
+    echo ""
+    echo -e "${BOLD}What's Normal?${NC}"
+    echo ""
+    echo "  • Connected peers can range from 0 to your max-clients limit"
+    echo "  • CPU usage typically stays under 20% with default settings"
+    echo "  • Memory usage is capped by your configured limit"
+    echo "  • Network usage depends on peer activity and bandwidth setting"
+    echo ""
+    echo -e "${BOLD}[STATS] Log Format:${NC}"
+    echo ""
+    echo "  The container logs show entries like:"
+    echo "  ${DIM}[STATS] Connected: 15, Connecting: 3, Max: 200${NC}"
+    echo ""
+    echo "  These update every few seconds when peers are active."
+    echo ""
+    echo "══════════════════════════════════════════════════════"
+    read -n 1 -s -r -p "Press any key to return..."
+}
+
+# show_info_security: Explain security and privacy
+show_info_security() {
+    print_header
+    echo -e "${CYAN}═══ SECURITY & PRIVACY ═══${NC}"
+    echo ""
+    echo -e "${BOLD}What You CAN'T See:${NC}"
+    echo "  • What websites users visit (traffic is encrypted)"
+    echo "  • Users' personal information or identity"
+    echo "  • The content being transferred"
+    echo ""
+    echo -e "${BOLD}What IS Visible:${NC}"
+    echo "  • Number of connected peers"
+    echo "  • Total bandwidth used"
+    echo "  • Your node's public ID (not your personal info)"
+    echo ""
+    echo -e "${BOLD}Container Isolation:${NC}"
+    echo "  Your Conduit runs in a hardened Docker container with:"
+    echo ""
+    echo "  ${GREEN}✔${NC} Read-only filesystem (can't modify your Mac)"
+    echo "  ${GREEN}✔${NC} Dropped privileges (minimal permissions)"
+    echo "  ${GREEN}✔${NC} Isolated network (can't access local services)"
+    echo "  ${GREEN}✔${NC} Resource limits (CPU/RAM caps)"
+    echo "  ${GREEN}✔${NC} No access to your files or documents"
+    echo ""
+    echo -e "${BOLD}Your IP Address:${NC}"
+    echo "  • Psiphon users see the Psiphon network, not your IP"
+    echo "  • Websites see traffic coming from your IP"
+    echo "  • This is similar to running a Tor exit node"
+    echo ""
+    echo -e "${BOLD}Legal Considerations:${NC}"
+    echo "  • Running a proxy is legal in most countries"
+    echo "  • You are not responsible for users' actions"
+    echo "  • Check your local laws if you have concerns"
+    echo ""
+    echo "══════════════════════════════════════════════════════"
+    read -n 1 -s -r -p "Press any key to return..."
+}
+
+# show_info_about: About Psiphon and links
+show_info_about() {
+    print_header
+    echo -e "${CYAN}═══ ABOUT PSIPHON CONDUIT ═══${NC}"
+    echo ""
+    echo -e "${BOLD}Psiphon's Mission:${NC}"
+    echo "  Psiphon is a circumvention tool that provides uncensored"
+    echo "  access to the internet. It has been used by millions of"
+    echo "  people in over 200 countries to bypass censorship."
+    echo ""
+    echo -e "${BOLD}What is Conduit?${NC}"
+    echo "  Conduit allows volunteers to donate bandwidth to help"
+    echo "  Psiphon users connect. By running a Conduit node, you"
+    echo "  become part of the global network fighting censorship."
+    echo ""
+    echo -e "${BOLD}Useful Links:${NC}"
+    echo ""
+    echo "  Psiphon Website:     ${CYAN}https://psiphon.ca${NC}"
+    echo "  Conduit GitHub:      ${CYAN}https://github.com/Psiphon-Inc/conduit${NC}"
+    echo "  This Manager:        ${CYAN}https://github.com/${GITHUB_REPO}${NC}"
+    echo "  Ryve Rewards App:    ${CYAN}https://network.ryve.app${NC}"
+    echo ""
+    echo -e "${BOLD}Conduit Manager v${VERSION}${NC}"
+    echo "  Security-hardened macOS edition"
+    echo ""
+    echo -e "${BOLD}Docker Image:${NC}"
+    echo "  ${DIM}${IMAGE}${NC}"
+    echo ""
+    echo "══════════════════════════════════════════════════════"
+    read -n 1 -s -r -p "Press any key to return..."
+}
+
+# show_info_menu: Main info hub menu
+show_info_menu() {
+    while true; do
+        print_header
+        echo -e "${CYAN}═══ INFO & HELP ═══${NC}"
+        echo ""
+        echo "  1. 🔌 How Conduit Works"
+        echo "  2. 📊 Understanding the Stats"
+        echo "  3. 🔒 Security & Privacy"
+        echo "  4. 🚀 About Psiphon Conduit"
+        echo ""
+        echo "  0. ← Back to Main Menu"
+        echo ""
+        read -p " Select option: " info_choice
+
+        case "$info_choice" in
+            1) show_info_how_it_works ;;
+            2) show_info_stats ;;
+            3) show_info_security ;;
+            4) show_info_about ;;
+            0|"") return ;;
+            *)
+                echo -e "${RED}Invalid option.${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# ==============================================================================
 # MAIN MENU LOOP
 # ==============================================================================
 
@@ -2389,6 +2561,7 @@ while true; do
     echo -e " ${BOLD}Menu Bar App${NC}"
     echo "   m. 🖥  Open Menu Bar App"
     echo ""
+    echo "   i. ℹ️  Info & Help"
     echo "   0. 🚪 Exit"
     echo ""
     read -p " Select option: " option
@@ -2423,6 +2596,7 @@ while true; do
         [uU]) check_for_updates ;;
         [xX]) uninstall_all ;;
         [mM]) open_menubar_app ;;
+        [iI]) show_info_menu ;;
         0)
             log_info "=== Conduit Manager session ended ==="
             echo -e "${CYAN}Goodbye!${NC}"

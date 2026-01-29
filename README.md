@@ -128,6 +128,7 @@ System Settings → General → Login Items → Add `Conduit-Mac.app`
  Menu Bar App
    m. 🖥  Open Menu Bar App
 
+   i. ℹ️  Info & Help
    0. 🚪 Exit
 ```
 
