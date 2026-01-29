@@ -117,6 +117,7 @@ System Settings → General → Login Items → Add `Conduit-Mac.app`
    7. 📈 Resource Limits
    8. 🔒 Security Settings
    9. 🆔 Node Identity
+   c. 🎁 Claim Rewards
 
  Backup & Maintenance
    b. 💾 Backup Key

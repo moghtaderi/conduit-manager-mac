@@ -35,7 +35,7 @@ set -euo pipefail
 # VERSION AND CONFIGURATION
 # ==============================================================================
 
-readonly VERSION="1.6.2"                                          # Script version
+readonly VERSION="1.7.0"                                          # Script version
 
 # Container and image settings
 readonly CONTAINER_NAME="conduit-mac"                             # Docker container name
@@ -2232,6 +2232,71 @@ open_menubar_app() {
 }
 
 # ==============================================================================
+# REWARD CLAIM FUNCTION (QR Code)
+# ==============================================================================
+
+# generate_claim_link: Generate a claim link and QR code for the Ryve app
+# This allows users to link their Conduit node to the Ryve mobile app for rewards
+generate_claim_link() {
+    print_header
+    echo -e "${CYAN}═══ 🎁 CLAIM NODE REWARDS ═══${NC}"
+    echo ""
+
+    # 1. Get Private Key from Docker volume
+    local key_val=$(docker run --rm -v "$VOLUME_NAME":/data alpine cat /data/conduit_key.json 2>/dev/null | grep "privateKeyBase64" | awk -F'"' '{print $4}')
+
+    if [ -z "$key_val" ]; then
+        echo -e "${RED}Error: Could not retrieve private key.${NC}"
+        echo "Make sure Conduit is installed and has started at least once."
+        read -n 1 -s -r -p "Press any key to return..." < /dev/tty
+        return 1
+    fi
+
+    # 2. Get Node Name from user
+    echo -e "Enter a name for this node to display in the Ryve app."
+    echo -e "Default: ${GREEN}My Conduit Node${NC}"
+    echo ""
+    read -p "Node Name: " input_name < /dev/tty
+    local node_name="${input_name:-My Conduit Node}"
+
+    # 3. Construct JSON & Encode to base64
+    local json_data="{\"version\":1,\"data\":{\"key\":\"$key_val\",\"name\":\"$node_name\"}}"
+    local b64_data=$(echo -n "$json_data" | base64 | tr -d '\n')
+    local claim_url="network.ryve.app://(app)/conduits?claim=$b64_data"
+
+    echo ""
+    echo -e "${GREEN}✔ Claim Link Generated:${NC}"
+    echo -e "${YELLOW}$claim_url${NC}"
+    echo ""
+
+    # 4. Check & Install qrencode if missing
+    if ! command -v qrencode >/dev/null 2>&1; then
+        echo -e "${YELLOW}QR Code tool (qrencode) is missing.${NC}"
+        if command -v brew >/dev/null 2>&1; then
+            echo -e "${BLUE}Attempting to install qrencode via Homebrew...${NC}"
+            brew install qrencode
+            echo ""
+        else
+            echo -e "${RED}Homebrew not found. Cannot auto-install qrencode.${NC}"
+        fi
+    fi
+
+    # 5. Display QR Code in terminal
+    if command -v qrencode >/dev/null 2>&1; then
+        echo -e "${CYAN}Scan this QR Code in the Ryve App:${NC}"
+        echo ""
+        echo -n "$claim_url" | qrencode -t UTF8
+        echo ""
+    else
+        echo -e "${YELLOW}Could not display QR Code.${NC}"
+        echo "Please copy the link above manually."
+    fi
+
+    echo ""
+    read -n 1 -s -r -p "Press any key to return..." < /dev/tty
+}
+
+# ==============================================================================
 # MAIN MENU LOOP
 # ==============================================================================
 
@@ -2269,6 +2334,7 @@ while true; do
     echo "   7. 📈 Resource Limits (CPU/RAM)"
     echo "   8. 🔒 Security Settings"
     echo "   9. 🆔 Node Identity"
+    echo "   c. 🎁 Claim Rewards"
     echo ""
     echo -e " ${BOLD}Backup & Maintenance${NC}"
     echo "   b. 💾 Backup Key"
@@ -2307,6 +2373,7 @@ while true; do
         7) configure_resources ;;
         8) show_security_info ;;
         9) show_node_info ;;
+        [cC]) generate_claim_link ;;
         [bB]) backup_key ;;
         [rR]) restore_key ;;
         [uU]) check_for_updates ;;
