@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="https://img.shields.io/badge/🛡️-Security_Hardened-green?style=for-the-badge" alt="Security Hardened">
+  <img src="https://img.shields.io/badge/🛡️_Security_Hardened-green?style=for-the-badge" alt="Security Hardened">
 </h1>
 
 <h1 align="center">Psiphon Conduit Manager</h1>
@@ -11,10 +11,10 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#security">Security</a> •
-  <a href="#features">Features</a> •
-  <a href="#فارسی">فارسی</a>
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#️-security">Security</a> •
+  <a href="#-features">Features</a> •
+  <a href="#-نصب-برای-ایرانیان-خارج-از-کشور">فارسی</a>
 </p>
 
 <p align="center">
@@ -26,15 +26,11 @@
 
 ---
 
-<h2 align="center">📊 Dashboard</h2>
-
 <p align="center">
-  <img src="assets/dashboard.png" alt="Conduit Dashboard" width="420">
+  <img src="assets/dashboard.png" alt="Conduit Dashboard" width="480">
 </p>
 
-<p align="center">
-  <em>Real-time stats, per-container controls, Node IDs, QR codes for rewards</em>
-</p>
+<p align="center"><em>Dashboard with real-time stats, Node IDs, and QR codes for rewards</em></p>
 
 ---
 
@@ -60,70 +56,40 @@ Press `7` → Set limits • Press `6` → Install • Press `m` → Open Menu B
 
 ## 🛡️ Security
 
-<table>
-<tr>
-<td width="50%">
-
 ### Your Mac is Fully Protected
 
-Running Conduit in Docker provides **complete isolation** from your system:
+Running Conduit in Docker provides **complete isolation**. The container:
 
-| Protection | What it means |
-|:----------:|---------------|
-| 🔒 **Read-only filesystem** | Container cannot write to your disk |
-| 🌐 **Isolated network** | No access to your local network or other apps |
-| ⬇️ **Dropped capabilities** | Minimal Linux privileges (CAP_DROP=ALL) |
-| 📊 **Resource limits** | CPU & RAM are capped to your settings |
-| 🛑 **Seccomp filtering** | Dangerous system calls are blocked |
-| 🚫 **No privilege escalation** | Cannot gain root access |
+- 🔒 **Cannot access your files** - Read-only filesystem
+- 🌐 **Cannot see your network** - Isolated bridge network
+- ⬇️ **Has minimal privileges** - All capabilities dropped
+- 📊 **Is resource-limited** - CPU & RAM capped to your settings
+- 🛑 **Cannot make dangerous calls** - Seccomp syscall filtering
+- 🚫 **Cannot escalate privileges** - No root access possible
 
-</td>
-<td width="50%">
+### v2.1.1 Security Fixes
 
-### v2.1.1 Security Updates
+| Fix | Description |
+|-----|-------------|
+| ✅ AppleScript injection | Path escaping in terminal launcher |
+| ✅ Path traversal | Validation in backup/restore |
+| ✅ Memory protection | Private keys cleared after use |
+| ✅ Update verification | Content validation before install |
+| ✅ Supply chain | Docker image digest verification |
 
-- ✅ **AppleScript injection** protection
-- ✅ **Path traversal** prevention in backup/restore
-- ✅ **Private keys** cleared from memory after use
-- ✅ **Update verification** with content validation
-- ✅ **Image digest** verification (supply chain security)
-
-### Why Docker?
-
-Docker containers run in a **sandbox** - even if the Conduit software were compromised, it cannot:
-- Access your files
-- See your network traffic
-- Install anything on your Mac
-- Persist after container removal
-
-</td>
-</tr>
-</table>
+> **Why Docker?** Even if Conduit were compromised, it cannot access your files, see your traffic, or persist after removal.
 
 ---
 
-## 🖥️ Native macOS Apps
+## 🖥️ Menu Bar & CLI
 
-<table>
-<tr>
-<td width="50%" align="center">
+<p align="center">
+  <img src="assets/menu-bar-app.png" alt="Menu Bar App" width="320">&nbsp;&nbsp;&nbsp;&nbsp;<img src="assets/cli-dashboard.png" alt="Terminal CLI" width="320">
+</p>
 
-### Menu Bar App
-<img src="assets/menu-bar-app.png" alt="Menu Bar" width="280">
-
-*Quick status at a glance*
-
-</td>
-<td width="50%" align="center">
-
-### Terminal CLI
-<img src="assets/cli-dashboard.png" alt="CLI" width="280">
-
-*Full control & configuration*
-
-</td>
-</tr>
-</table>
+<p align="center">
+  <em>Menu Bar: Quick status</em> &nbsp;•&nbsp; <em>CLI: Full configuration</em>
+</p>
 
 ---
 
@@ -132,37 +98,21 @@ Docker containers run in a **sandbox** - even if the Conduit software were compr
 | Feature | Description |
 |:-------:|-------------|
 | **Multi-Container** | Run up to 5 Conduit nodes simultaneously |
-| **Dashboard Window** | Full stats with Node IDs and QR codes |
-| **Menu Bar App** | Native macOS - see status instantly |
+| **Dashboard** | Full stats with Node IDs and QR codes |
+| **Menu Bar App** | Native macOS status at a glance |
 | **Live Stats** | Connected clients & traffic in real-time |
 | **QR Codes** | Scan to claim rewards in Ryve app |
-| **Backup & Restore** | Never lose your Node ID |
+| **Backup/Restore** | Never lose your Node ID |
 | **Auto-Updates** | One-click updates with verification |
-| **Start at Login** | Runs automatically in background |
 
 ---
 
-## 🔧 Menu Bar Icons
+## 📦 Multi-Container
 
-| Icon | Meaning |
-|:----:|---------|
-| 📡 (green) | Conduit is **running** |
-| 📡 (slashed) | Conduit is **stopped** |
-| ⚠️ (warning) | Docker is **not running** |
-
-### Start at Login
-System Settings → General → Login Items → Add `Conduit-Mac.app`
-
----
-
-## 📦 Multi-Container Setup
-
-Run multiple nodes for increased contribution:
+Run multiple nodes via **Container Manager** (option `9`):
 
 ```
-Container Manager (option 9 in CLI)
-═══════════════════════════════════
-  Current: 3/5 containers
+═══ CONTAINER MANAGER ═══
 
   NAME              STATUS     CLIENTS
   conduit-mac       Running    33
@@ -170,26 +120,26 @@ Container Manager (option 9 in CLI)
   conduit-mac-3     Running    9
 ```
 
-Each container has its own Node ID, settings, and rewards tracking.
+Each container has its own Node ID and rewards tracking.
 
 ---
 
 ## ❓ FAQ
 
 **Will updating lose my Node ID?**
-> No. Updates only replace the app. Your Node ID is stored in a Docker volume which is preserved.
+> No. Your Node ID is in a Docker volume, preserved during updates.
 
 **How do I backup my Node ID?**
-> Press `b` in the CLI menu. Backups go to `~/.conduit-backups/`
+> Press `b` in CLI. Backups go to `~/.conduit-backups/`
 
-**Is this safe to run?**
-> Yes. Docker provides complete isolation. See [Security](#️-security) section.
+**Is this safe?**
+> Yes. Docker provides complete isolation. See [Security](#️-security).
 
 ---
 
 ## 🗑️ Uninstall
 
-Press `x` in the CLI menu, or manually:
+Press `x` in the CLI menu, or:
 ```bash
 docker stop conduit-mac && docker rm conduit-mac
 docker volume rm conduit-data && docker network rm conduit-network
@@ -200,30 +150,30 @@ rm -rf ~/conduit-manager ~/.conduit-*
 
 ## Credits
 
-- [Psiphon](https://psiphon.ca/) - Psiphon Conduit project
-- [SamNet-dev/conduit-manager](https://github.com/SamNet-dev/conduit-manager) - Original Linux script
+- [Psiphon](https://psiphon.ca/) - Conduit project
+- [SamNet-dev/conduit-manager](https://github.com/SamNet-dev/conduit-manager) - Original script
 
 ---
 
-<a id="فارسی"></a>
+<a id="-نصب-برای-ایرانیان-خارج-از-کشور"></a>
 
 <div dir="rtl">
 
-## 🇮🇷 نصب برای کاربران ایرانی
+## 🇮🇷 نصب برای ایرانیان خارج از کشور
 
 ### این برنامه کاملاً امن است
 
-برنامه Conduit داخل Docker اجرا می‌شود که یک **محیط ایزوله** است:
+Conduit داخل Docker اجرا می‌شود - یک محیط کاملاً ایزوله:
 - ❌ به فایل‌های شما دسترسی ندارد
-- ❌ به شبکه محلی شما دسترسی ندارد
-- ❌ نمی‌تواند چیزی روی مک نصب کند
-- ✅ فقط به اینترنت برای کمک به دیگران متصل می‌شود
+- ❌ به شبکه محلی دسترسی ندارد
+- ❌ نمی‌تواند چیزی نصب کند
+- ✅ فقط به مردم ایران کمک می‌کند به اینترنت آزاد دسترسی پیدا کنند
 
-### نصب سریع
+### نصب
 
-**مرحله ۱:** Docker Desktop را از [docker.com](https://www.docker.com/products/docker-desktop/) نصب کنید
+**۱.** Docker Desktop را از [docker.com](https://www.docker.com/products/docker-desktop/) نصب کنید
 
-**مرحله ۲:** این دستور را در Terminal اجرا کنید:
+**۲.** این دستور را اجرا کنید:
 
 </div>
 
@@ -233,7 +183,7 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 <div dir="rtl">
 
-**مرحله ۳:** برنامه را اجرا کنید:
+**۳.** برنامه را باز کنید:
 
 </div>
 
@@ -243,17 +193,17 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 
 <div dir="rtl">
 
-**مرحله ۴:** کلید `7` برای تنظیمات، سپس `6` برای نصب، و `m` برای باز کردن برنامه Menu Bar
+**۴.** کلید `7` سپس `6` سپس `m`
 
 </div>
 
 ---
 
 <p align="center">
-  <img src="assets/iran.png" alt="Conduit Network Map" width="700">
+  <img src="assets/iran.png" alt="Conduit Network - Iran" width="650">
 </p>
 
-<h3 align="center">#FreeIran 🕊️</h3>
+<h2 align="center">#FreeIran 🕊️</h2>
 
 <p align="center"><em>Every node helps someone access the free internet</em></p>
 
