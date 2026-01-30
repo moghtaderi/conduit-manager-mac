@@ -14,7 +14,7 @@
   <a href="#-quick-start">Quick Start</a> •
   <a href="#️-security">Security</a> •
   <a href="#-features">Features</a> •
-  <a href="#-نصب-برای-ایرانیان-خارج-از-کشور">فارسی</a>
+  <a href="#نصب-برای-ایرانیان-خارج-از-کشور">فارسی</a>
 </p>
 
 <p align="center">
@@ -66,16 +66,8 @@ Running Conduit in Docker provides **complete isolation**. The container:
 - 📊 **Is resource-limited** - CPU & RAM capped to your settings
 - 🛑 **Cannot make dangerous calls** - Seccomp syscall filtering
 - 🚫 **Cannot escalate privileges** - No root access possible
-
-### v2.1.1 Security Fixes
-
-| Fix | Description |
-|-----|-------------|
-| ✅ AppleScript injection | Path escaping in terminal launcher |
-| ✅ Path traversal | Validation in backup/restore |
-| ✅ Memory protection | Private keys cleared after use |
-| ✅ Update verification | Content validation before install |
-| ✅ Supply chain | Docker image digest verification |
+- ✅ **Verified images** - Docker image digest verification
+- ✅ **Safe updates** - Content validation before install
 
 > **Why Docker?** Even if Conduit were compromised, it cannot access your files, see your traffic, or persist after removal.
 
@@ -155,15 +147,16 @@ rm -rf ~/conduit-manager ~/.conduit-*
 
 ---
 
-<a id="-نصب-برای-ایرانیان-خارج-از-کشور"></a>
+<a id="نصب-برای-ایرانیان-خارج-از-کشور"></a>
 
-<div dir="rtl">
+<div dir="rtl" align="right">
 
-## 🇮🇷 نصب برای ایرانیان خارج از کشور
+## نصب برای ایرانیان خارج از کشور
 
 ### این برنامه کاملاً امن است
 
 Conduit داخل Docker اجرا می‌شود - یک محیط کاملاً ایزوله:
+
 - ❌ به فایل‌های شما دسترسی ندارد
 - ❌ به شبکه محلی دسترسی ندارد
 - ❌ نمی‌تواند چیزی نصب کند
@@ -181,7 +174,7 @@ Conduit داخل Docker اجرا می‌شود - یک محیط کاملاً ای
 curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
 ```
 
-<div dir="rtl">
+<div dir="rtl" align="right">
 
 **۳.** برنامه را باز کنید:
 
@@ -191,7 +184,7 @@ curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main
 ~/conduit-manager/conduit-mac.sh
 ```
 
-<div dir="rtl">
+<div dir="rtl" align="right">
 
 **۴.** کلید `7` سپس `6` سپس `m`
 
