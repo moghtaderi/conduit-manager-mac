@@ -27,7 +27,7 @@
 ---
 
 <p align="center">
-  <img src="assets/dashboard.png" alt="Conduit Dashboard" width="480">
+  <img src="assets/dashboard-window.png" alt="Conduit Dashboard" width="480">
 </p>
 
 <p align="center"><em>Dashboard with real-time stats, Node IDs, and QR codes for rewards</em></p>
@@ -155,12 +155,15 @@ rm -rf ~/conduit-manager ~/.conduit-*
 
 ### این برنامه کاملاً امن است
 
-Conduit داخل Docker اجرا می‌شود - یک محیط کاملاً ایزوله:
+برنامه Conduit داخل Docker اجرا می‌شود که یک محیط کاملاً ایزوله است:
 
-- ❌ به فایل‌های شما دسترسی ندارد
-- ❌ به شبکه محلی دسترسی ندارد
-- ❌ نمی‌تواند چیزی نصب کند
-- ✅ فقط به مردم ایران کمک می‌کند به اینترنت آزاد دسترسی پیدا کنند
+❌ به فایل‌های شما دسترسی ندارد
+
+❌ به شبکه محلی دسترسی ندارد
+
+❌ نمی‌تواند چیزی نصب کند
+
+✅ فقط به مردم ایران کمک می‌کند به اینترنت آزاد دسترسی پیدا کنند
 
 ### نصب
 
