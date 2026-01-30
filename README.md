@@ -69,7 +69,21 @@ Running Conduit in Docker provides **complete isolation**. The container:
 - ✅ **Verified images** - Docker image digest verification
 - ✅ **Safe updates** - Content validation before install
 
-> **Why Docker?** Even if Conduit were compromised, it cannot access your files, see your traffic, or persist after removal.
+### Why Docker Instead of a Native App?
+
+A regular macOS app runs directly on your system with access to your files, network, and other apps. If it has a bug or gets compromised, your entire system is at risk.
+
+**Docker creates an isolated sandbox:**
+
+| Native App | Docker Container |
+|------------|------------------|
+| ❌ Full access to your files | ✅ Cannot see your files |
+| ❌ Can see all network traffic | ✅ Isolated network bridge |
+| ❌ Can install software | ✅ Read-only filesystem |
+| ❌ Runs with your permissions | ✅ Minimal privileges only |
+| ❌ May leave traces after uninstall | ✅ Clean removal, no traces |
+
+> **Bottom line:** Even if the Conduit software had a security vulnerability, it cannot escape the Docker sandbox to harm your Mac.
 
 ---
 
@@ -153,53 +167,26 @@ rm -rf ~/conduit-manager ~/.conduit-*
 
 ## نصب برای ایرانیان خارج از کشور
 
-### این برنامه کاملاً امن است
-
-برنامه Conduit داخل Docker اجرا می‌شود که یک محیط کاملاً ایزوله است:
-
-❌ به فایل‌های شما دسترسی ندارد
-
-❌ به شبکه محلی دسترسی ندارد
-
-❌ نمی‌تواند چیزی نصب کند
-
-✅ فقط به مردم کمک می‌کند به اینترنت آزاد دسترسی پیدا کنند
-
 ### چرا Docker؟
 
-برخی برنامه‌ها مستقیماً روی سیستم شما اجرا می‌شوند و به همه فایل‌ها و شبکه دسترسی دارند. اما Docker یک "جعبه امن" ایجاد می‌کند:
-
-✅ حتی اگر برنامه Conduit مشکل امنیتی داشته باشد، نمی‌تواند به سیستم شما آسیب برساند
-
-✅ بعد از حذف، هیچ اثری روی سیستم باقی نمی‌ماند
-
-✅ منابع (CPU/RAM) محدود شده و کنترل کامل دارید
+برنامه‌های معمولی مستقیماً روی سیستم اجرا می‌شوند و به همه فایل‌ها دسترسی دارند. اما Docker یک "جعبه امن" ایجاد می‌کند - حتی اگر برنامه مشکل امنیتی داشته باشد، نمی‌تواند به سیستم شما آسیب برساند.
 
 ### نصب
 
-**۱.** Docker Desktop را از [docker.com](https://www.docker.com/products/docker-desktop/) نصب کنید
+**۱.** [Docker Desktop](https://www.docker.com/products/docker-desktop/) را نصب کنید
 
-**۲.** این دستور را اجرا کنید:
+**۲.** در Terminal اجرا کنید:
 
 </div>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
-```
-
-<div dir="rtl" align="right">
-
-**۳.** برنامه را باز کنید:
-
-</div>
-
-```bash
 ~/conduit-manager/conduit-mac.sh
 ```
 
 <div dir="rtl" align="right">
 
-**۴.** کلید `7` سپس `6` سپس `m`
+**۳.** کلید `7` → `6` → `m`
 
 </div>
 
