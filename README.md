@@ -1,116 +1,148 @@
+<h1 align="center">
+  <img src="https://img.shields.io/badge/🛡️-Security_Hardened-green?style=for-the-badge" alt="Security Hardened">
+</h1>
+
 <h1 align="center">Psiphon Conduit Manager</h1>
-<p align="center"><strong>macOS Edition</strong></p>
+<p align="center"><strong>macOS Edition • v2.1.1</strong></p>
 
 <p align="center">
-  Help people in censored regions access the free internet.<br>
-  Run a <a href="https://conduit.psiphon.ca/">Psiphon Conduit</a> proxy node on your Mac.
+  <b>Help people in censored regions access the free internet.</b><br>
+  Run a <a href="https://conduit.psiphon.ca/">Psiphon Conduit</a> proxy node safely on your Mac.
 </p>
 
 <p align="center">
-  <a href="#quick-start">English</a> · <a href="#farsi">فارسی</a>
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#security">Security</a> •
+  <a href="#features">Features</a> •
+  <a href="#فارسی">فارسی</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS-blue" alt="macOS">
-  <img src="https://img.shields.io/badge/requires-Docker%20Desktop-blue" alt="Docker">
-  <img src="https://img.shields.io/github/v/release/moghtaderi/conduit-manager-mac" alt="Release">
+  <img src="https://img.shields.io/badge/platform-macOS-blue?style=flat-square" alt="macOS">
+  <img src="https://img.shields.io/badge/requires-Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/github/v/release/moghtaderi/conduit-manager-mac?style=flat-square&color=green" alt="Release">
+  <img src="https://img.shields.io/badge/containers-up_to_5-orange?style=flat-square" alt="Multi-container">
 </p>
 
 ---
 
-## Features
+<h2 align="center">📊 Dashboard</h2>
 
-| Feature | Description |
-|---------|-------------|
-| **Multi-Container** | Run up to 5 Conduit nodes simultaneously |
-| **Menu Bar App** | Native macOS app - Start/Stop with one click |
-| **Dashboard Window** | Full stats view with Node IDs and QR codes |
-| **Live Stats** | See connected clients & traffic in real-time |
-| **Per-Container Control** | Start, stop, reconfigure individual containers |
-| **QR Code Support** | Scan to link nodes to Ryve app for rewards |
-| **Security Hardened** | Read-only filesystem, isolated network, seccomp |
-| **Docker Status** | Auto-detects if Docker is running |
-| **Dark Mode** | Works perfectly in light and dark mode |
+<p align="center">
+  <img src="assets/dashboard.png" alt="Conduit Dashboard" width="420">
+</p>
+
+<p align="center">
+  <em>Real-time stats, per-container controls, Node IDs, QR codes for rewards</em>
+</p>
 
 ---
 
-## Quick Start
+## ⚡ Quick Start
 
-### Step 1: Install Docker Desktop
-
+### 1. Install Docker Desktop
 Download from **[docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)**
 
-### Step 2: Install Conduit Manager
-
+### 2. Install Conduit Manager
 ```bash
 curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
 ```
 
-### Step 3: Run Setup
-
+### 3. Run & Configure
 ```bash
 ~/conduit-manager/conduit-mac.sh
 ```
-
-### Step 4: Configure
-
-| Step | Press | What it does |
-|:----:|:-----:|--------------|
-| 1 | `7` | Set your CPU & RAM limits |
-| 2 | `6` | Reconfigure/Install the Conduit service |
-| 3 | `m` | Open the Menu Bar App |
+Press `7` → Set limits • Press `6` → Install • Press `m` → Open Menu Bar App
 
 **Done!** Your node is now helping people access the free internet.
 
 ---
 
-## Menu Bar App
+## 🛡️ Security
 
-Quick status view from your menu bar:
+<table>
+<tr>
+<td width="50%">
 
-```
-┌─────────────────────────────────┐
-│ ● Running (2/2 containers)      │
-│ 12 clients                      │
-│ ↑ 2.4 GB  ↓ 6.8 GB              │
-│ Limit: 300 clients / 50 Mbps    │
-├─────────────────────────────────┤
-│ ● conduit-mac: 5 clients        │
-│ ● conduit-mac-2: 7 clients      │
-├─────────────────────────────────┤
-│ Open Dashboard...          ⌘D   │
-│ Open Terminal...           ▸    │
-├─────────────────────────────────┤
-│ v2.1.0                          │
-│ Quit                       ⌘Q   │
-└─────────────────────────────────┘
-```
+### Your Mac is Fully Protected
 
-### Dashboard Window
+Running Conduit in Docker provides **complete isolation** from your system:
 
-Click **Open Dashboard** (⌘D) for a full-featured window with:
+| Protection | What it means |
+|:----------:|---------------|
+| 🔒 **Read-only filesystem** | Container cannot write to your disk |
+| 🌐 **Isolated network** | No access to your local network or other apps |
+| ⬇️ **Dropped capabilities** | Minimal Linux privileges (CAP_DROP=ALL) |
+| 📊 **Resource limits** | CPU & RAM are capped to your settings |
+| 🛑 **Seccomp filtering** | Dangerous system calls are blocked |
+| 🚫 **No privilege escalation** | Cannot gain root access |
+
+</td>
+<td width="50%">
+
+### v2.1.1 Security Updates
+
+- ✅ **AppleScript injection** protection
+- ✅ **Path traversal** prevention in backup/restore
+- ✅ **Private keys** cleared from memory after use
+- ✅ **Update verification** with content validation
+- ✅ **Image digest** verification (supply chain security)
+
+### Why Docker?
+
+Docker containers run in a **sandbox** - even if the Conduit software were compromised, it cannot:
+- Access your files
+- See your network traffic
+- Install anything on your Mac
+- Persist after container removal
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🖥️ Native macOS Apps
+
+<table>
+<tr>
+<td width="50%" align="center">
+
+### Menu Bar App
+<img src="assets/menu-bar-app.png" alt="Menu Bar" width="280">
+
+*Quick status at a glance*
+
+</td>
+<td width="50%" align="center">
+
+### Terminal CLI
+<img src="assets/cli-dashboard.png" alt="CLI" width="280">
+
+*Full control & configuration*
+
+</td>
+</tr>
+</table>
+
+---
+
+## ✨ Features
 
 | Feature | Description |
-|---------|-------------|
-| **Node IDs** | View and copy Node IDs for each container |
-| **QR Codes** | Scan to claim rewards in the Ryve app |
-| **Live Stats** | Connected clients, traffic, uptime per container |
-| **Per-Container Controls** | Start, stop, restart individual containers |
-| **Logs View** | Filter by INFO, STATS, or ERRORS |
-| **Health Check** | Docker system status and container health |
+|:-------:|-------------|
+| **Multi-Container** | Run up to 5 Conduit nodes simultaneously |
+| **Dashboard Window** | Full stats with Node IDs and QR codes |
+| **Menu Bar App** | Native macOS - see status instantly |
+| **Live Stats** | Connected clients & traffic in real-time |
+| **QR Codes** | Scan to claim rewards in Ryve app |
+| **Backup & Restore** | Never lose your Node ID |
+| **Auto-Updates** | One-click updates with verification |
+| **Start at Login** | Runs automatically in background |
 
-### Multi-Container Support
+---
 
-Run multiple Conduit nodes on a single Mac:
-
-| Feature | Description |
-|---------|-------------|
-| **Per-Container Stats** | View clients, traffic, uptime for each container |
-| **Individual Control** | Restart or stop specific containers |
-| **Aggregated Totals** | Main view shows combined stats |
-| **Unique Node IDs** | Each container has its own identity for rewards |
-
-### Menu Bar Icons
+## 🔧 Menu Bar Icons
 
 | Icon | Meaning |
 |:----:|---------|
@@ -119,221 +151,48 @@ Run multiple Conduit nodes on a single Mac:
 | ⚠️ (warning) | Docker is **not running** |
 
 ### Start at Login
-
 System Settings → General → Login Items → Add `Conduit-Mac.app`
 
 ---
 
-## CLI Menu Options
+## 📦 Multi-Container Setup
+
+Run multiple nodes for increased contribution:
 
 ```
-╔═══════════════════════════════════════╗
-║      PSIPHON CONDUIT MANAGER          ║
-╚═══════════════════════════════════════╝
-
- Service
-   1. ▶️  Start / Restart
-   2. ⏹️  Stop Service
-   3. 📊 Live Dashboard
-   4. 📜 View Logs
-   5. 🩺 Health Check
-
- Configuration
-   6. 🛠️  Reconfigure
-   7. 📈 Resource Limits
-   8. 🆔 Node Identity
-   9. 📦 Container Manager
-   c. 🎁 Claim Rewards
-
- Backup & Maintenance
-   b. 💾 Backup Key
-   r. 📥 Restore Key
-   u. 🔄 Check for Updates
-   x. 🗑  Uninstall
-
- Menu Bar App
-   m. 🖥  Open Menu Bar App
-
-   i. ℹ️  Info & Help
-   0. 🚪 Exit
-```
-
----
-
-## Security
-
-Your Mac is fully protected:
-
-| Protection | What it means |
-|------------|---------------|
-| Read-only filesystem | Container can't write to your disk |
-| Isolated network | No access to your local network |
-| Dropped capabilities | Minimal Linux privileges |
-| Resource limits | CPU & RAM are capped |
-| Seccomp filtering | Dangerous syscalls blocked |
-
----
-
-## FAQ
-
-### Will updating lose my Node ID?
-
-**No.** Updates only replace the script and menu bar app. Your Node ID is stored in a Docker volume (`conduit-data`) which is preserved during updates.
-
-### What does the Node ID represent?
-
-Your Node ID is a unique cryptographic identifier for your volunteer node. Psiphon uses it to track your node's reputation and contribution history. If you lose it (by uninstalling), you start fresh with a new identity.
-
-### How do I backup my Node ID?
-
-Press `b` in the CLI menu to create a backup. Backups are saved to `~/.conduit-backups/` and can be restored later with `r`.
-
----
-
-## Multi-Container Setup
-
-Add more containers via **Container Manager** (option `9` in CLI):
-
-```
-═══ CONTAINER MANAGER ═══
-
-  Current: 2/5 containers running
+Container Manager (option 9 in CLI)
+═══════════════════════════════════
+  Current: 3/5 containers
 
   NAME              STATUS     CLIENTS
-  conduit-mac       Running    5
-  conduit-mac-2     Running    7
-
-  1. Add Container
-  2. Remove Container
-  3. Restart Single Container
-  4. Stop Single Container
+  conduit-mac       Running    33
+  conduit-mac-2     Running    13
+  conduit-mac-3     Running    9
 ```
 
-Each container gets its own:
-- Node identity (unique ID for rewards)
-- Max clients setting
-- Bandwidth limit
-- Docker volume for data persistence
+Each container has its own Node ID, settings, and rewards tracking.
 
 ---
 
-## Uninstall
+## ❓ FAQ
 
-**Easy way:** Press `x` in the CLI menu
+**Will updating lose my Node ID?**
+> No. Updates only replace the app. Your Node ID is stored in a Docker volume which is preserved.
 
-**Manual way:**
-```bash
-# Stop and remove all containers
-docker stop conduit-mac conduit-mac-2 conduit-mac-3 2>/dev/null
-docker rm conduit-mac conduit-mac-2 conduit-mac-3 2>/dev/null
-docker volume rm conduit-data conduit-data-2 conduit-data-3 2>/dev/null
-docker network rm conduit-network
-rm -rf ~/conduit-manager ~/.conduit-*
-```
+**How do I backup my Node ID?**
+> Press `b` in the CLI menu. Backups go to `~/.conduit-backups/`
+
+**Is this safe to run?**
+> Yes. Docker provides complete isolation. See [Security](#️-security) section.
 
 ---
 
-<div dir="rtl">
+## 🗑️ Uninstall
 
-<a id="farsi"></a>
-
-## نصب سریع
-
-### مرحله ۱: نصب Docker Desktop
-
-از **[docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)** دانلود کنید
-
-### مرحله ۲: نصب Conduit Manager
-
-</div>
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
-```
-
-<div dir="rtl">
-
-### مرحله ۳: اجرای برنامه
-
-</div>
-
-```bash
-~/conduit-manager/conduit-mac.sh
-```
-
-<div dir="rtl">
-
-### مرحله ۴: پیکربندی
-
-| مرحله | کلید | توضیح |
-|:-----:|:----:|-------|
-| ۱ | `7` | تنظیم محدودیت CPU و RAM |
-| ۲ | `6` | نصب سرویس Conduit |
-| ۳ | `m` | باز کردن برنامه Menu Bar |
-
-**تمام!** نود شما اکنون فعال است و به دیگران کمک می‌کند.
-
----
-
-## برنامه Menu Bar
-
-نمای سریع وضعیت از نوار منو:
-
-</div>
-
-```
-┌─────────────────────────────────┐
-│ ● Running (2/2 containers)      │
-│ 12 clients                      │
-│ ↑ 2.4 GB  ↓ 6.8 GB              │
-├─────────────────────────────────┤
-│ ● conduit-mac: 5 clients        │
-│ ● conduit-mac-2: 7 clients      │
-├─────────────────────────────────┤
-│ Open Dashboard...          ⌘D   │
-│ Open Terminal...           ▸    │
-├─────────────────────────────────┤
-│ Quit                       ⌘Q   │
-└─────────────────────────────────┘
-```
-
-<div dir="rtl">
-
-### آیکون‌های Menu Bar
-
-| آیکون | معنی |
-|:-----:|------|
-| 📡 (سبز) | Conduit **در حال اجراست** |
-| 📡 (خط‌خورده) | Conduit **متوقف است** |
-| ⚠️ (هشدار) | Docker **اجرا نیست** |
-
----
-
-## امنیت
-
-مک شما کاملاً محافظت شده است:
-
-| محافظت | توضیح |
-|--------|-------|
-| فایل‌سیستم فقط‌خواندنی | کانتینر نمی‌تواند روی دیسک بنویسد |
-| شبکه ایزوله | دسترسی به شبکه محلی ندارد |
-| امتیازات محدود | حداقل دسترسی‌های لینوکس |
-| محدودیت منابع | CPU و RAM محدود شده |
-
----
-
-## حذف برنامه
-
-**روش آسان:** در منوی CLI کلید `x` را بزنید
-
-**روش دستی:**
-
-</div>
-
+Press `x` in the CLI menu, or manually:
 ```bash
 docker stop conduit-mac && docker rm conduit-mac
-docker volume rm conduit-data
-docker network rm conduit-network
+docker volume rm conduit-data && docker network rm conduit-network
 rm -rf ~/conduit-manager ~/.conduit-*
 ```
 
@@ -344,6 +203,60 @@ rm -rf ~/conduit-manager ~/.conduit-*
 - [Psiphon](https://psiphon.ca/) - Psiphon Conduit project
 - [SamNet-dev/conduit-manager](https://github.com/SamNet-dev/conduit-manager) - Original Linux script
 
-## License
+---
 
-MIT
+<a id="فارسی"></a>
+
+<div dir="rtl">
+
+## 🇮🇷 نصب برای کاربران ایرانی
+
+### این برنامه کاملاً امن است
+
+برنامه Conduit داخل Docker اجرا می‌شود که یک **محیط ایزوله** است:
+- ❌ به فایل‌های شما دسترسی ندارد
+- ❌ به شبکه محلی شما دسترسی ندارد
+- ❌ نمی‌تواند چیزی روی مک نصب کند
+- ✅ فقط به اینترنت برای کمک به دیگران متصل می‌شود
+
+### نصب سریع
+
+**مرحله ۱:** Docker Desktop را از [docker.com](https://www.docker.com/products/docker-desktop/) نصب کنید
+
+**مرحله ۲:** این دستور را در Terminal اجرا کنید:
+
+</div>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/moghtaderi/conduit-manager-mac/main/install.sh | bash
+```
+
+<div dir="rtl">
+
+**مرحله ۳:** برنامه را اجرا کنید:
+
+</div>
+
+```bash
+~/conduit-manager/conduit-mac.sh
+```
+
+<div dir="rtl">
+
+**مرحله ۴:** کلید `7` برای تنظیمات، سپس `6` برای نصب، و `m` برای باز کردن برنامه Menu Bar
+
+</div>
+
+---
+
+<p align="center">
+  <img src="assets/iran.png" alt="Conduit Network Map" width="700">
+</p>
+
+<h3 align="center">#FreeIran 🕊️</h3>
+
+<p align="center"><em>Every node helps someone access the free internet</em></p>
+
+---
+
+<p align="center">MIT License</p>
